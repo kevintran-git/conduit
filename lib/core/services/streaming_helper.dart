@@ -186,16 +186,61 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
       // Not a natural completion
       if (!hasReceivedData) {
         DebugLogger.stream(
-          'Stream closed without data - likely interrupted, not completing',
+          'Stream closed without data - checking if backend completed',
         );
-        // Check if app is backgrounding - if so, finish streaming with whatever we have
-        await Future.delayed(const Duration(milliseconds: 300));
+        
+        // Check if app is backgrounding
         if (persistentService.isInBackground) {
           DebugLogger.stream(
             'App backgrounding during stream - finishing with current content',
           );
           finishStreaming();
+          return;
         }
+        
+        // Wait for backend to potentially complete
+        await Future.delayed(const Duration(seconds: 3));
+        
+        final chatId = activeConversationId;
+        if (chatId != null && chatId.isNotEmpty) {
+          try {
+            // Fetch the conversation from server
+            final conversation = await api.getConversation(chatId);
+            
+            // Find the assistant message
+            ChatMessage? assistant;
+            for (final message in conversation.messages.reversed) {
+              if (message.role == 'assistant' && message.id == assistantMessageId) {
+                assistant = message;
+                break;
+              }
+            }
+            
+            if (assistant != null && assistant.content.isNotEmpty) {
+              DebugLogger.log(
+                'Backend had completed - recovered content',
+                scope: 'streaming/helper',
+              );
+              
+              // Update message content
+              replaceLastMessageContent(assistant.content);
+              finishStreaming();
+              return;
+            } else {
+              DebugLogger.log(
+                'Backend not ready yet - persistent service will handle recovery',
+                scope: 'streaming/helper',
+              );
+            }
+          } catch (e) {
+            DebugLogger.error(
+              'Failed to check backend completion',
+              scope: 'streaming/helper',
+              error: e,
+            );
+          }
+        }
+        
         // Don't close the controller to prevent cascading completion handlers
         return;
       }
@@ -230,9 +275,73 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
     controller: persistentController,
     recoveryCallback: () async {
       DebugLogger.log(
-        'Attempting to recover interrupted stream',
+        'Stream interrupted - checking if backend completed',
         scope: 'streaming/helper',
       );
+      
+      // Wait for backend to potentially complete
+      await Future.delayed(const Duration(seconds: 2));
+      
+      final chatId = activeConversationId;
+      if (chatId == null || chatId.isEmpty) {
+        DebugLogger.log(
+          'No conversation ID - cannot recover',
+          scope: 'streaming/helper',
+        );
+        finishStreaming();
+        return;
+      }
+      
+      try {
+        // Fetch the conversation from server
+        final conversation = await api.getConversation(chatId);
+        
+        // Find the assistant message
+        ChatMessage? assistant;
+        for (final message in conversation.messages.reversed) {
+          if (message.role == 'assistant' && message.id == assistantMessageId) {
+            assistant = message;
+            break;
+          }
+        }
+        
+        if (assistant != null && assistant.content.isNotEmpty) {
+          DebugLogger.log(
+            'Backend had completed - recovered content',
+            scope: 'streaming/helper',
+          );
+          
+          // Update message content
+          replaceLastMessageContent(assistant.content);
+          
+          // Update metadata (follow-ups, sources, etc.)
+          setFollowUps(assistant.id, assistant.followUps);
+          updateMessageById(assistant.id, (current) {
+            return current.copyWith(
+              followUps: List<String>.from(assistant.followUps),
+              statusHistory: assistant.statusHistory,
+              sources: assistant.sources,
+              metadata: {...?current.metadata, ...?assistant.metadata},
+              usage: assistant.usage,
+            );
+          });
+          
+          finishStreaming();
+        } else {
+          DebugLogger.log(
+            'Backend not ready yet - will retry',
+            scope: 'streaming/helper',
+          );
+          // Don't finish streaming - let persistent service retry
+        }
+      } catch (e) {
+        DebugLogger.error(
+          'Recovery failed',
+          scope: 'streaming/helper',
+          error: e,
+        );
+        // Don't finish streaming - let persistent service retry
+      }
     },
     metadata: {
       'conversationId': activeConversationId,
@@ -1220,9 +1329,30 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
         }
       }
 
+      // Before giving up, try to fetch the completed message from server
+      final msgs = getMessages();
+      if (msgs.isNotEmpty && msgs.last.role == 'assistant' && msgs.last.content.isEmpty) {
+        // Wait a bit for backend to potentially complete
+        await Future.delayed(const Duration(seconds: 2));
+        
+        try {
+          await refreshConversationSnapshot();
+        } catch (e) {
+          DebugLogger.error(
+            'Failed to refresh conversation after error',
+            scope: 'streaming/helper',
+            error: e,
+          );
+        }
+      } else if (msgs.isNotEmpty && msgs.last.role == 'assistant') {
+        DebugLogger.log(
+          'Content already present - no need to fetch',
+          scope: 'streaming/helper',
+        );
+      }
+
       disposeSocketSubscriptions();
       finishStreaming();
-      Future.microtask(refreshConversationSnapshot);
       socketWatchdog?.stop();
     },
   );
