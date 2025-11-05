@@ -942,6 +942,13 @@ class AppLocalizationsDe extends AppLocalizations {
       'Enter sendet (Soft-Tastatur). Cmd/Ctrl+Enter ebenfalls verfügbar';
 
   @override
+  String get hapticFeedback => 'Haptic Feedback';
+
+  @override
+  String get hapticFeedbackDescription =>
+      'Provide tactile feedback for interactions and responses.';
+
+  @override
   String get sttSettings => 'Sprache zu Text';
 
   @override
@@ -1215,4 +1222,28 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get transportModeWsInfo =>
       'Geringerer Overhead, kann jedoch hinter strikten Proxys/Firewalls fehlschlagen.';
+
+  @override
+  String get chatStreamingMode => 'Chat Streaming Mode';
+
+  @override
+  String get chatStreamingModeHybrid => 'Hybrid';
+
+  @override
+  String get chatStreamingModeHybridInfo =>
+      'Uses WebSocket when available, falls back to SSE.';
+
+  @override
+  String get chatStreamingModeWs => 'WebSocket Only';
+
+  @override
+  String get chatStreamingModeWsInfo =>
+      'Lower overhead, but may fail behind strict proxies/firewalls.';
+
+  @override
+  String get chatStreamingModeSse => 'SSE Only';
+
+  @override
+  String get chatStreamingModeSseInfo =>
+      'More compatible but higher overhead than WebSocket.';
 }

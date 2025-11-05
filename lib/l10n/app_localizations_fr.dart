@@ -951,6 +951,13 @@ class AppLocalizationsFr extends AppLocalizations {
       'Entrée envoie (clavier logiciel). Cmd/Ctrl+Entrée aussi disponible';
 
   @override
+  String get hapticFeedback => 'Haptic Feedback';
+
+  @override
+  String get hapticFeedbackDescription =>
+      'Provide tactile feedback for interactions and responses.';
+
+  @override
   String get sttSettings => 'Voix vers texte';
 
   @override
@@ -1224,4 +1231,28 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String get transportModeWsInfo =>
       'Moins de surcharge, mais peut échouer derrière des proxys/firewalls stricts.';
+
+  @override
+  String get chatStreamingMode => 'Chat Streaming Mode';
+
+  @override
+  String get chatStreamingModeHybrid => 'Hybrid';
+
+  @override
+  String get chatStreamingModeHybridInfo =>
+      'Uses WebSocket when available, falls back to SSE.';
+
+  @override
+  String get chatStreamingModeWs => 'WebSocket Only';
+
+  @override
+  String get chatStreamingModeWsInfo =>
+      'Lower overhead, but may fail behind strict proxies/firewalls.';
+
+  @override
+  String get chatStreamingModeSse => 'SSE Only';
+
+  @override
+  String get chatStreamingModeSseInfo =>
+      'More compatible but higher overhead than WebSocket.';
 }

@@ -1231,6 +1231,14 @@
   "@sendOnEnterDescription": {
     "description": "Explanation of how the Send on Enter toggle behaves."
   },
+  "hapticFeedback": "Haptic Feedback",
+  "@hapticFeedback": {
+    "description": "Toggle title for enabling haptic feedback."
+  },
+  "hapticFeedbackDescription": "Provide tactile feedback for interactions and responses.",
+  "@hapticFeedbackDescription": {
+    "description": "Explanation of what haptic feedback does."
+  },
   "sttSettings": "Speech to Text",
   "@sttSettings": {
     "description": "Section header for speech-to-text settings."
@@ -1550,5 +1558,33 @@
   "transportModeWsInfo": "Lower overhead, but may fail behind strict proxies/firewalls.",
   "@transportModeWsInfo": {
     "description": "Footnote text for the WebSocket-only transport mode."
+  },
+  "chatStreamingMode": "Chat Streaming Mode",
+  "@chatStreamingMode": {
+    "description": "Title for selecting the streaming mode used for chat responses."
+  },
+  "chatStreamingModeHybrid": "Hybrid",
+  "@chatStreamingModeHybrid": {
+    "description": "Label for hybrid streaming mode (WebSocket with SSE fallback)."
+  },
+  "chatStreamingModeHybridInfo": "Uses WebSocket when available, falls back to SSE.",
+  "@chatStreamingModeHybridInfo": {
+    "description": "Description of the hybrid streaming mode."
+  },
+  "chatStreamingModeWs": "WebSocket Only",
+  "@chatStreamingModeWs": {
+    "description": "Label for WebSocket-only streaming mode."
+  },
+  "chatStreamingModeWsInfo": "Lower overhead, but may fail behind strict proxies/firewalls.",
+  "@chatStreamingModeWsInfo": {
+    "description": "Description of the WebSocket-only streaming mode."
+  },
+  "chatStreamingModeSse": "SSE Only",
+  "@chatStreamingModeSse": {
+    "description": "Label for SSE-only streaming mode."
+  },
+  "chatStreamingModeSseInfo": "More compatible but higher overhead than WebSocket.",
+  "@chatStreamingModeSseInfo": {
+    "description": "Description of the SSE-only streaming mode."
   }
 }

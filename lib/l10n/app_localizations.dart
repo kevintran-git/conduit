@@ -1804,6 +1804,18 @@ abstract class AppLocalizations {
   /// **'Enter sends (soft keyboard). Cmd/Ctrl+Enter also available'**
   String get sendOnEnterDescription;
 
+  /// Toggle title for enabling haptic feedback.
+  ///
+  /// In en, this message translates to:
+  /// **'Haptic Feedback'**
+  String get hapticFeedback;
+
+  /// Explanation of what haptic feedback does.
+  ///
+  /// In en, this message translates to:
+  /// **'Provide tactile feedback for interactions and responses.'**
+  String get hapticFeedbackDescription;
+
   /// Section header for speech-to-text settings.
   ///
   /// In en, this message translates to:
@@ -2265,6 +2277,48 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Lower overhead, but may fail behind strict proxies/firewalls.'**
   String get transportModeWsInfo;
+
+  /// Title for selecting the streaming mode used for chat responses.
+  ///
+  /// In en, this message translates to:
+  /// **'Chat Streaming Mode'**
+  String get chatStreamingMode;
+
+  /// Label for hybrid streaming mode (WebSocket with SSE fallback).
+  ///
+  /// In en, this message translates to:
+  /// **'Hybrid'**
+  String get chatStreamingModeHybrid;
+
+  /// Description of the hybrid streaming mode.
+  ///
+  /// In en, this message translates to:
+  /// **'Uses WebSocket when available, falls back to SSE.'**
+  String get chatStreamingModeHybridInfo;
+
+  /// Label for WebSocket-only streaming mode.
+  ///
+  /// In en, this message translates to:
+  /// **'WebSocket Only'**
+  String get chatStreamingModeWs;
+
+  /// Description of the WebSocket-only streaming mode.
+  ///
+  /// In en, this message translates to:
+  /// **'Lower overhead, but may fail behind strict proxies/firewalls.'**
+  String get chatStreamingModeWsInfo;
+
+  /// Label for SSE-only streaming mode.
+  ///
+  /// In en, this message translates to:
+  /// **'SSE Only'**
+  String get chatStreamingModeSse;
+
+  /// Description of the SSE-only streaming mode.
+  ///
+  /// In en, this message translates to:
+  /// **'More compatible but higher overhead than WebSocket.'**
+  String get chatStreamingModeSseInfo;
 }
 
 class _AppLocalizationsDelegate

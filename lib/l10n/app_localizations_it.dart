@@ -940,6 +940,13 @@ class AppLocalizationsIt extends AppLocalizations {
       'Invio invia (tastiera software). Cmd/Ctrl+Invio disponibile';
 
   @override
+  String get hapticFeedback => 'Haptic Feedback';
+
+  @override
+  String get hapticFeedbackDescription =>
+      'Provide tactile feedback for interactions and responses.';
+
+  @override
   String get sttSettings => 'Voce in testo';
 
   @override
@@ -1208,4 +1215,28 @@ class AppLocalizationsIt extends AppLocalizations {
   @override
   String get transportModeWsInfo =>
       'Minore overhead, ma può fallire dietro proxy/firewall restrittivi.';
+
+  @override
+  String get chatStreamingMode => 'Chat Streaming Mode';
+
+  @override
+  String get chatStreamingModeHybrid => 'Hybrid';
+
+  @override
+  String get chatStreamingModeHybridInfo =>
+      'Uses WebSocket when available, falls back to SSE.';
+
+  @override
+  String get chatStreamingModeWs => 'WebSocket Only';
+
+  @override
+  String get chatStreamingModeWsInfo =>
+      'Lower overhead, but may fail behind strict proxies/firewalls.';
+
+  @override
+  String get chatStreamingModeSse => 'SSE Only';
+
+  @override
+  String get chatStreamingModeSseInfo =>
+      'More compatible but higher overhead than WebSocket.';
 }
