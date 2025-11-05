@@ -848,6 +848,11 @@ class _ModernChatInputState extends ConsumerState<ModernChatInput>
                 ),
               ),
               const SizedBox(width: Spacing.sm),
+              // Add badge next to stop button when generating
+              if (isGenerating) ...[
+                _buildStreamingModeBadge(settings.chatStreamingMode),
+                const SizedBox(width: Spacing.xs),
+              ],
               _buildPrimaryButton(
                 _hasText,
                 isGenerating,
@@ -931,6 +936,11 @@ class _ModernChatInputState extends ConsumerState<ModernChatInput>
                   if (!_hasText && voiceAvailable && !isGenerating) ...[
                     _buildMicButton(voiceAvailable),
                     const SizedBox(width: Spacing.sm),
+                  ],
+                  // Add badge next to stop button when generating
+                  if (isGenerating) ...[
+                    _buildStreamingModeBadge(settings.chatStreamingMode),
+                    const SizedBox(width: Spacing.xs),
                   ],
                   _buildPrimaryButton(
                     _hasText,
@@ -1540,6 +1550,53 @@ class _ModernChatInputState extends ConsumerState<ModernChatInput>
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStreamingModeBadge(String mode) {
+    final theme = context.conduitTheme;
+    String label;
+    Color badgeColor;
+
+    switch (mode) {
+      case 'ws':
+        label = 'WS';
+        badgeColor = const Color(0xFF4CAF50); // Green for success
+        break;
+      case 'sse':
+        label = 'SSE';
+        badgeColor = const Color(0xFFFF9800); // Orange for warning
+        break;
+      case 'hybrid':
+      default:
+        label = 'SSE+WS';
+        badgeColor = theme.buttonPrimary; // Blue for primary
+        break;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: Spacing.xs,
+        vertical: 4,
+      ),
+      decoration: BoxDecoration(
+        color: badgeColor.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(AppBorderRadius.sm),
+        border: Border.all(
+          color: badgeColor.withValues(alpha: 0.3),
+          width: 1,
+        ),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: badgeColor,
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+          height: 1.0,
+          letterSpacing: 0.3,
         ),
       ),
     );
