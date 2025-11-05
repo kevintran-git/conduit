@@ -41,6 +41,14 @@
       }
     }
   },
+  "connectionTimeout": "연결 시간 초과",
+  "@connectionTimeout": {
+    "description": "Title shown when a connection or authentication times out."
+  },
+  "connectionTimeoutMessage": "앱이 연결하는 데 예상보다 오래 걸리고 있습니다. 느린 연결이나 서버 시간 초과 때문일 수 있습니다.",
+  "@connectionTimeoutMessage": {
+    "description": "Detailed message explaining a connection timeout on the splash screen."
+  },
   "errorAnnouncement": "오류: {error}",
   "@errorAnnouncement": {
     "description": "Screen reader announcement for an error.",
