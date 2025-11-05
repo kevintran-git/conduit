@@ -9,7 +9,6 @@ import 'package:go_router/go_router.dart';
 import '../../../core/auth/auth_state_manager.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../../core/services/navigation_service.dart';
-import '../../../features/auth/providers/unified_auth_providers.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../shared/theme/theme_extensions.dart';
 import '../../../shared/widgets/conduit_components.dart';
@@ -26,6 +25,8 @@ class _SplashLauncherPageState extends ConsumerState<SplashLauncherPage> {
   Timer? _timeoutTimer;
   bool _showTimeout = false;
   bool _isRecovering = false;
+  int _tapCount = 0;
+  Timer? _tapResetTimer;
 
   @override
   void initState() {
@@ -43,7 +44,32 @@ class _SplashLauncherPageState extends ConsumerState<SplashLauncherPage> {
   @override
   void dispose() {
     _timeoutTimer?.cancel();
+    _tapResetTimer?.cancel();
     super.dispose();
+  }
+
+  void _handleTap() {
+    _tapCount++;
+    
+    // Reset tap count after 1 second
+    _tapResetTimer?.cancel();
+    _tapResetTimer = Timer(const Duration(seconds: 1), () {
+      if (mounted) {
+        setState(() {
+          _tapCount = 0;
+        });
+      }
+    });
+
+    // Show recovery screen on triple tap
+    if (_tapCount >= 3) {
+      _tapResetTimer?.cancel();
+      _timeoutTimer?.cancel();
+      setState(() {
+        _showTimeout = true;
+        _tapCount = 0;
+      });
+    }
   }
 
   Future<void> _handleLogout() async {
@@ -128,27 +154,19 @@ class _SplashLauncherPageState extends ConsumerState<SplashLauncherPage> {
   }
 
   Widget _buildLoading(BuildContext context, AppLocalizations? l10n) {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        SizedBox(
-          width: 28,
-          height: 28,
-          child: CircularProgressIndicator(
-            strokeWidth: 2.5,
-            valueColor: AlwaysStoppedAnimation<Color>(
-              context.conduitTheme.loadingIndicator,
-            ),
+    return GestureDetector(
+      onTap: _handleTap,
+      behavior: HitTestBehavior.opaque,
+      child: SizedBox(
+        width: 28,
+        height: 28,
+        child: CircularProgressIndicator(
+          strokeWidth: 2.5,
+          valueColor: AlwaysStoppedAnimation<Color>(
+            context.conduitTheme.loadingIndicator,
           ),
         ),
-        const SizedBox(height: 24),
-        Text(
-          l10n?.loadingApp ?? 'Loading...',
-          style: context.conduitTheme.bodyMedium?.copyWith(
-            color: context.conduitTheme.textSecondary,
-          ),
-        ),
-      ],
+      ),
     );
   }
 

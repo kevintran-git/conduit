@@ -540,7 +540,7 @@
   "@loadingShort": {
     "description": "Short loading label used for accessibility."
   },
-  "loadingAnnouncement": "Chargement : {message}",
+  "loadingAnnouncement": "Chargement : {message}",
   "@loadingAnnouncement": {
     "description": "Screen reader announcement when loading a resource.",
     "placeholders": {
@@ -550,7 +550,15 @@
       }
     }
   },
-  "errorAnnouncement": "Erreur : {error}",
+  "connectionTimeout": "Délai de connexion dépassé",
+  "@connectionTimeout": {
+    "description": "Title shown when a connection or authentication times out."
+  },
+  "connectionTimeoutMessage": "L'application met plus de temps que prévu pour se connecter. Cela peut être dû à une connexion lente ou à un délai d'attente du serveur.",
+  "@connectionTimeoutMessage": {
+    "description": "Detailed message explaining a connection timeout on the splash screen."
+  },
+  "errorAnnouncement": "Erreur : {error}",
   "@errorAnnouncement": {
     "description": "Screen reader announcement for an error.",
     "placeholders": {

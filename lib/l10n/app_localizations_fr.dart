@@ -108,12 +108,19 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String loadingAnnouncement(String message) {
-    return 'Chargement : $message';
+    return 'Chargement : $message';
   }
 
   @override
+  String get connectionTimeout => 'Délai de connexion dépassé';
+
+  @override
+  String get connectionTimeoutMessage =>
+      'L\'application met plus de temps que prévu pour se connecter. Cela peut être dû à une connexion lente ou à un délai d\'attente du serveur.';
+
+  @override
   String errorAnnouncement(String error) {
-    return 'Erreur : $error';
+    return 'Erreur : $error';
   }
 
   @override

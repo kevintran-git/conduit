@@ -550,6 +550,14 @@
       }
     }
   },
+  "connectionTimeout": "Timeout della connessione",
+  "@connectionTimeout": {
+    "description": "Title shown when a connection or authentication times out."
+  },
+  "connectionTimeoutMessage": "L'app sta impiegando più tempo del previsto per connettersi. Questo potrebbe essere dovuto a una connessione lenta o a un timeout del server.",
+  "@connectionTimeoutMessage": {
+    "description": "Detailed message explaining a connection timeout on the splash screen."
+  },
   "errorAnnouncement": "Errore: {error}",
   "@errorAnnouncement": {
     "description": "Screen reader announcement for an error.",

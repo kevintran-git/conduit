@@ -124,10 +124,6 @@
   "@loadingShort": {
     "description": "Short loading label used for accessibility."
   },
-  "loadingApp": "Loading app...",
-  "@loadingApp": {
-    "description": "Loading message shown on splash screen during app initialization."
-  },
   "loadingAnnouncement": "Loading: {message}",
   "@loadingAnnouncement": {
     "description": "Screen reader announcement when loading a resource.",

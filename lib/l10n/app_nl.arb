@@ -550,6 +550,14 @@
       }
     }
   },
+  "connectionTimeout": "Verbindingstime-out",
+  "@connectionTimeout": {
+    "description": "Title shown when a connection or authentication times out."
+  },
+  "connectionTimeoutMessage": "De app heeft langer nodig dan verwacht om verbinding te maken. Dit kan komen door een trage verbinding of een server-timeout.",
+  "@connectionTimeoutMessage": {
+    "description": "Detailed message explaining a connection timeout on the splash screen."
+  },
   "errorAnnouncement": "Fout: {error}",
   "@errorAnnouncement": {
     "description": "Screen reader announcement for an error.",

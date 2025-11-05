@@ -111,6 +111,13 @@ class AppLocalizationsIt extends AppLocalizations {
   }
 
   @override
+  String get connectionTimeout => 'Timeout della connessione';
+
+  @override
+  String get connectionTimeoutMessage =>
+      'L\'app sta impiegando più tempo del previsto per connettersi. Questo potrebbe essere dovuto a una connessione lenta o a un timeout del server.';
+
+  @override
   String errorAnnouncement(String error) {
     return 'Errore: $error';
   }
