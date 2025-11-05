@@ -304,6 +304,18 @@ abstract class AppLocalizations {
   /// **'Loading: {message}'**
   String loadingAnnouncement(String message);
 
+  /// Title shown when a connection or authentication times out.
+  ///
+  /// In en, this message translates to:
+  /// **'Connection Timeout'**
+  String get connectionTimeout;
+
+  /// Detailed message explaining a connection timeout on the splash screen.
+  ///
+  /// In en, this message translates to:
+  /// **'The app is taking longer than expected to connect. This might be due to a slow connection or server timeout.'**
+  String get connectionTimeoutMessage;
+
   /// Screen reader announcement for an error.
   ///
   /// In en, this message translates to:

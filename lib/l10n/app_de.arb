@@ -569,6 +569,14 @@
       }
     }
   },
+  "connectionTimeout": "Verbindungszeitüberschreitung",
+  "@connectionTimeout": {
+    "description": "Title shown when a connection or authentication times out."
+  },
+  "connectionTimeoutMessage": "Die App braucht länger als erwartet, um sich zu verbinden. Dies kann an einer langsamen Verbindung oder einer Serverzeitüberschreitung liegen.",
+  "@connectionTimeoutMessage": {
+    "description": "Detailed message explaining a connection timeout on the splash screen."
+  },
   "errorAnnouncement": "Fehler: {error}",
   "@errorAnnouncement": {
     "description": "Screen reader announcement for an error.",

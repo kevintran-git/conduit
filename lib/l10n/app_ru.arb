@@ -569,6 +569,14 @@
       }
     }
   },
+  "connectionTimeout": "Превышено время ожидания соединения",
+  "@connectionTimeout": {
+    "description": "Title shown when a connection or authentication times out."
+  },
+  "connectionTimeoutMessage": "Приложение подключается дольше обычного. Это может быть вызвано медленным соединением или тайм-аутом сервера.",
+  "@connectionTimeoutMessage": {
+    "description": "Detailed message explaining a connection timeout on the splash screen."
+  },
   "errorAnnouncement": "Ошибка: {error}",
   "@errorAnnouncement": {
     "description": "Screen reader announcement for an error.",

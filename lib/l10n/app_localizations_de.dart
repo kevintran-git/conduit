@@ -113,6 +113,13 @@ class AppLocalizationsDe extends AppLocalizations {
   }
 
   @override
+  String get connectionTimeout => 'Verbindungszeitüberschreitung';
+
+  @override
+  String get connectionTimeoutMessage =>
+      'Die App braucht länger als erwartet, um sich zu verbinden. Dies kann an einer langsamen Verbindung oder einer Serverzeitüberschreitung liegen.';
+
+  @override
   String errorAnnouncement(String error) {
     return 'Fehler: $error';
   }

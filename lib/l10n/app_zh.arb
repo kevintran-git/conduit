@@ -569,6 +569,14 @@
       }
     }
   },
+  "connectionTimeout": "连接超时",
+  "@connectionTimeout": {
+    "description": "Title shown when a connection or authentication times out."
+  },
+  "connectionTimeoutMessage": "应用连接时间超过预期。这可能是由于网络连接缓慢或服务器超时所致。",
+  "@connectionTimeoutMessage": {
+    "description": "Detailed message explaining a connection timeout on the splash screen."
+  },
   "errorAnnouncement": "错误：{error}",
   "@errorAnnouncement": {
     "description": "Screen reader announcement for an error.",
