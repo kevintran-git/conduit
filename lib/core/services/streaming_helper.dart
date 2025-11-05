@@ -186,10 +186,33 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
       // Not a natural completion
       if (!hasReceivedData) {
         DebugLogger.stream(
-          'Stream closed without data - likely interrupted, not completing',
+          'Stream closed without data - likely interrupted, attempting recovery',
         );
-        // Check if app is backgrounding - if so, finish streaming with whatever we have
-        await Future.delayed(const Duration(milliseconds: 300));
+        // Wait briefly for backend to complete processing
+        await Future.delayed(const Duration(seconds: 1));
+        
+        // Attempt to fetch completed response from server
+        try {
+          await refreshConversationSnapshot();
+          
+          // Check if server had content and update UI
+          final msgs = getMessages();
+          if (msgs.isNotEmpty && msgs.last.role == 'assistant') {
+            final content = msgs.last.content.trim();
+            if (content.isNotEmpty) {
+              DebugLogger.stream(
+                'Recovery successful: fetched ${content.length} chars from server',
+              );
+              replaceLastMessageContent(content);
+              finishStreaming();
+              return;
+            }
+          }
+        } catch (e) {
+          DebugLogger.stream('Recovery fetch failed: $e');
+        }
+        
+        // If recovery didn't help and app is backgrounding, finish with what we have
         if (persistentService.isInBackground) {
           DebugLogger.stream(
             'App backgrounding during stream - finishing with current content',
@@ -230,9 +253,37 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
     controller: persistentController,
     recoveryCallback: () async {
       DebugLogger.log(
-        'Attempting to recover interrupted stream',
+        'Recovering interrupted stream - fetching completed content',
         scope: 'streaming/helper',
       );
+      
+      // Wait for any in-flight backend processing
+      await Future.delayed(const Duration(seconds: 1));
+      
+      try {
+        // Fetch conversation snapshot from server
+        await refreshConversationSnapshot();
+        
+        // Update message with server content
+        final msgs = getMessages();
+        if (msgs.isNotEmpty && msgs.last.role == 'assistant') {
+          final serverContent = msgs.last.content.trim();
+          if (serverContent.isNotEmpty) {
+            DebugLogger.log(
+              'Recovery callback: fetched ${serverContent.length} chars from server',
+              scope: 'streaming/helper',
+            );
+            replaceLastMessageContent(serverContent);
+            finishStreaming();
+          }
+        }
+      } catch (e) {
+        DebugLogger.error(
+          'Recovery callback failed',
+          scope: 'streaming/helper',
+          error: e,
+        );
+      }
     },
     metadata: {
       'conversationId': activeConversationId,
@@ -375,6 +426,7 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
       setFollowUps(assistant.id, assistant.followUps);
       updateMessageById(assistant.id, (current) {
         return current.copyWith(
+          content: assistant.content,  // Include content from server
           followUps: List<String>.from(assistant.followUps),
           statusHistory: assistant.statusHistory,
           sources: assistant.sources,
@@ -1206,17 +1258,48 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
           errorText.contains('TimeoutException') ||
           errorText.contains('HandshakeException');
 
-      if (isRecoverable && socketService != null) {
-        // Try to recover via socket connection if available
+      if (isRecoverable) {
+        DebugLogger.stream(
+          'Recoverable error detected, attempting to fetch completed response',
+        );
+        
+        // Wait for backend to complete processing
+        await Future.delayed(const Duration(seconds: 2));
+        
         try {
-          await socketService.ensureConnected(
-            timeout: const Duration(seconds: 5),
-          );
-          // Don't finish streaming immediately - let socket recovery handle it
-          socketWatchdog?.stop();
-          return;
-        } catch (_) {
-          // Socket recovery failed, fall through to cleanup
+          // Fetch completed response from server
+          await refreshConversationSnapshot();
+          
+          // Check if server has content and update UI
+          final msgs = getMessages();
+          if (msgs.isNotEmpty && msgs.last.role == 'assistant') {
+            final content = msgs.last.content.trim();
+            if (content.isNotEmpty) {
+              DebugLogger.stream(
+                'Error recovery successful: fetched ${content.length} chars from server',
+              );
+              replaceLastMessageContent(content);
+              finishStreaming();
+              socketWatchdog?.stop();
+              return;
+            }
+          }
+        } catch (e) {
+          DebugLogger.stream('Error recovery fetch failed: $e');
+        }
+        
+        // Try socket recovery as fallback
+        if (socketService != null) {
+          try {
+            await socketService.ensureConnected(
+              timeout: const Duration(seconds: 5),
+            );
+            // Don't finish streaming immediately - let socket recovery handle it
+            socketWatchdog?.stop();
+            return;
+          } catch (_) {
+            // Socket recovery failed, fall through to cleanup
+          }
         }
       }
 
