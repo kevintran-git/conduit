@@ -265,8 +265,16 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
         if (currentMsgs.isNotEmpty && 
             currentMsgs.last.role == 'assistant' &&
             currentMsgs.last.content.trim().isNotEmpty) {
-          DebugLogger.stream('Content already present - no need to fetch');
-          finishStreaming();
+          DebugLogger.stream('Content already present from WebSocket/recovery');
+          
+          // Only finish streaming if we're in SSE-only mode
+          // In hybrid or WebSocket mode, let WebSocket handle completion via 'done: true'
+          if (chatStreamingMode == 'sse') {
+            DebugLogger.stream('SSE-only mode - completing now');
+            finishStreaming();
+          } else {
+            DebugLogger.stream('Hybrid/WebSocket mode - keeping stream open for WebSocket');
+          }
           persistentController.close();
           return;
         }
@@ -308,7 +316,10 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
                       usage: assistant.usage,
                     );
                   });
-                  finishStreaming();
+                  // Only finish streaming if we're in SSE-only mode
+                  if (chatStreamingMode == 'sse') {
+                    finishStreaming();
+                  }
                   persistentController.close();
                 } else {
                   // No content yet - keep stream registered for retry
