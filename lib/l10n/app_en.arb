@@ -124,6 +124,10 @@
   "@loadingShort": {
     "description": "Short loading label used for accessibility."
   },
+  "loadingApp": "Loading app...",
+  "@loadingApp": {
+    "description": "Loading message shown on splash screen during app initialization."
+  },
   "loadingAnnouncement": "Loading: {message}",
   "@loadingAnnouncement": {
     "description": "Screen reader announcement when loading a resource.",
@@ -133,6 +137,14 @@
         "example": "Messages"
       }
     }
+  },
+  "connectionTimeout": "Connection Timeout",
+  "@connectionTimeout": {
+    "description": "Title shown when a connection or authentication times out."
+  },
+  "connectionTimeoutMessage": "The app is taking longer than expected to connect. This might be due to a slow connection or server timeout.",
+  "@connectionTimeoutMessage": {
+    "description": "Detailed message explaining a connection timeout on the splash screen."
   },
   "errorAnnouncement": "Error: {error}",
   "@errorAnnouncement": {
