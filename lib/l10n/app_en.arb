@@ -1219,6 +1219,34 @@
   "@sendOnEnterDescription": {
     "description": "Explanation of how the Send on Enter toggle behaves."
   },
+  "hapticFeedback": "Haptic Feedback",
+  "@hapticFeedback": {
+    "description": "Toggle title for haptic feedback during streaming."
+  },
+  "hapticFeedbackDescription": "Subtle vibration when receiving message chunks",
+  "@hapticFeedbackDescription": {
+    "description": "Explanation of haptic feedback feature."
+  },
+  "chatStreamingMode": "Chat streaming",
+  "@chatStreamingMode": {
+    "description": "Title for chat streaming mode selector."
+  },
+  "chatStreamingModeHybrid": "Hybrid (SSE + WebSocket)",
+  "@chatStreamingModeHybrid": {
+    "description": "Hybrid streaming mode using both SSE and WebSocket."
+  },
+  "chatStreamingModeWs": "WebSocket only",
+  "@chatStreamingModeWs": {
+    "description": "WebSocket-only streaming mode."
+  },
+  "chatStreamingModeSse": "SSE only",
+  "@chatStreamingModeSse": {
+    "description": "SSE-only streaming mode."
+  },
+  "chatStreamingModeDescription": "How LLM responses are streamed",
+  "@chatStreamingModeDescription": {
+    "description": "Subtitle for streaming mode selector."
+  },
   "ttsEngineLabel": "Engine",
   "@ttsEngineLabel": {
     "description": "Label for selecting the text-to-speech engine."

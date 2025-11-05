@@ -32,6 +32,8 @@ class SettingsService {
       .quickPills; // StringList of identifiers e.g. ['web','image','tools']
   // Chat input behavior
   static const String _sendOnEnterKey = PreferenceKeys.sendOnEnterKey;
+  // Chat streaming mode preference
+  static const String _chatStreamingModeKey = PreferenceKeys.chatStreamingMode;
   static Box<dynamic> _preferencesBox() =>
       Hive.box<dynamic>(HiveBoxNames.preferences);
 
@@ -139,6 +141,8 @@ class SettingsService {
           (box.get(_quickPillsKey) as List<dynamic>?) ?? const <String>[],
         ),
         sendOnEnter: (box.get(_sendOnEnterKey) as bool?) ?? false,
+        chatStreamingMode:
+            box.get(_chatStreamingModeKey, defaultValue: 'hybrid') as String,
         ttsVoice: box.get(PreferenceKeys.ttsVoice) as String?,
         ttsSpeechRate:
             (box.get(PreferenceKeys.ttsSpeechRate) as num?)?.toDouble() ?? 0.5,
@@ -170,6 +174,7 @@ class SettingsService {
       _socketTransportModeKey: settings.socketTransportMode,
       _quickPillsKey: settings.quickPills.toList(),
       _sendOnEnterKey: settings.sendOnEnter,
+      _chatStreamingModeKey: settings.chatStreamingMode,
       PreferenceKeys.ttsSpeechRate: settings.ttsSpeechRate,
       PreferenceKeys.ttsPitch: settings.ttsPitch,
       PreferenceKeys.ttsVolume: settings.ttsVolume,
@@ -304,6 +309,22 @@ class SettingsService {
     return _preferencesBox().put(_sendOnEnterKey, value);
   }
 
+  // Chat streaming mode
+  static Future<String> getChatStreamingMode() {
+    final raw = _preferencesBox().get(_chatStreamingModeKey) as String?;
+    if (raw == null || (raw != 'hybrid' && raw != 'ws' && raw != 'sse')) {
+      return Future.value('hybrid');
+    }
+    return Future.value(raw);
+  }
+
+  static Future<void> setChatStreamingMode(String mode) {
+    if (mode != 'hybrid' && mode != 'ws' && mode != 'sse') {
+      mode = 'hybrid';
+    }
+    return _preferencesBox().put(_chatStreamingModeKey, mode);
+  }
+
   /// Get effective animation duration considering all settings
   static Duration getEffectiveAnimationDuration(
     BuildContext context,
@@ -359,6 +380,7 @@ class AppSettings {
   final String socketTransportMode; // 'polling' or 'ws'
   final List<String> quickPills; // e.g., ['web','image']
   final bool sendOnEnter;
+  final String chatStreamingMode; // 'hybrid' | 'ws' | 'sse'
   final String? ttsVoice;
   final double ttsSpeechRate;
   final double ttsPitch;
@@ -380,6 +402,7 @@ class AppSettings {
     this.socketTransportMode = 'ws',
     this.quickPills = const [],
     this.sendOnEnter = false,
+    this.chatStreamingMode = 'hybrid',
     this.ttsVoice,
     this.ttsSpeechRate = 0.5,
     this.ttsPitch = 1.0,
@@ -403,6 +426,7 @@ class AppSettings {
     String? socketTransportMode,
     List<String>? quickPills,
     bool? sendOnEnter,
+    String? chatStreamingMode,
     Object? ttsVoice = const _DefaultValue(),
     double? ttsSpeechRate,
     double? ttsPitch,
@@ -429,6 +453,7 @@ class AppSettings {
       socketTransportMode: socketTransportMode ?? this.socketTransportMode,
       quickPills: quickPills ?? this.quickPills,
       sendOnEnter: sendOnEnter ?? this.sendOnEnter,
+      chatStreamingMode: chatStreamingMode ?? this.chatStreamingMode,
       ttsVoice: ttsVoice is _DefaultValue ? this.ttsVoice : ttsVoice as String?,
       ttsSpeechRate: ttsSpeechRate ?? this.ttsSpeechRate,
       ttsPitch: ttsPitch ?? this.ttsPitch,
@@ -458,6 +483,7 @@ class AppSettings {
         other.voiceHoldToTalk == voiceHoldToTalk &&
         other.voiceAutoSendFinal == voiceAutoSendFinal &&
         other.sendOnEnter == sendOnEnter &&
+        other.chatStreamingMode == chatStreamingMode &&
         other.ttsVoice == ttsVoice &&
         other.ttsSpeechRate == ttsSpeechRate &&
         other.ttsPitch == ttsPitch &&
@@ -484,6 +510,7 @@ class AppSettings {
       voiceAutoSendFinal,
       socketTransportMode,
       sendOnEnter,
+      chatStreamingMode,
       ttsVoice,
       ttsSpeechRate,
       ttsPitch,
@@ -601,6 +628,15 @@ class AppSettingsNotifier extends _$AppSettingsNotifier {
   Future<void> setSendOnEnter(bool value) async {
     state = state.copyWith(sendOnEnter: value);
     await SettingsService.setSendOnEnter(value);
+  }
+
+  Future<void> setChatStreamingMode(String mode) async {
+    var sanitized = mode;
+    if (sanitized != 'hybrid' && sanitized != 'ws' && sanitized != 'sse') {
+      sanitized = 'hybrid';
+    }
+    state = state.copyWith(chatStreamingMode: sanitized);
+    await SettingsService.setChatStreamingMode(sanitized);
   }
 
   Future<void> setTtsVoice(String? voice) async {
