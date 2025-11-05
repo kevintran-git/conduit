@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../core/models/chat_message.dart';
 import '../../core/models/socket_event.dart';
@@ -185,11 +184,11 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
   // Track last haptic feedback time to avoid over-triggering
   DateTime? lastHapticTime;
   const hapticThrottleDuration = Duration(milliseconds: 200);
-  int _hapticTriggerCount = 0;
+  int hapticTriggerCount = 0;
   
   // Track chunks for summary logging (reduce verbosity)
-  int _chunkCount = 0;
-  int _totalCharsReceived = 0;
+  int chunkCount = 0;
+  int totalCharsReceived = 0;
 
   // Helper to trigger haptic feedback with throttling
   void triggerHapticFeedback() {
@@ -205,10 +204,10 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
     if (lastHapticTime == null ||
         now.difference(lastHapticTime!) > hapticThrottleDuration) {
       lastHapticTime = now;
-      _hapticTriggerCount++;
+      hapticTriggerCount++;
       
       DebugLogger.log(
-        'Triggering haptic feedback (#$_hapticTriggerCount)',
+        'Triggering haptic feedback (#$hapticTriggerCount)',
         scope: 'streaming/haptic',
       );
       
@@ -1421,13 +1420,13 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
   final controller = StreamingResponseController(
     stream: persistentController.stream,
     onChunk: (chunk) {
-      _chunkCount++;
-      _totalCharsReceived += chunk.length;
+      chunkCount++;
+      totalCharsReceived += chunk.length;
       
       // Log summary every 20 chunks instead of every chunk
-      if (_chunkCount % 20 == 0) {
+      if (chunkCount % 20 == 0) {
         DebugLogger.log(
-          'Streaming progress: $_chunkCount chunks, $_totalCharsReceived chars',
+          'Streaming progress: $chunkCount chunks, $totalCharsReceived chars',
           scope: 'streaming/progress',
         );
       }
@@ -1469,7 +1468,7 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
     onComplete: () {
       // Log streaming summary
       DebugLogger.log(
-        'Streaming completed: $_chunkCount chunks, $_totalCharsReceived total chars',
+        'Streaming completed: $chunkCount chunks, $totalCharsReceived total chars',
         scope: 'streaming/summary',
       );
       
