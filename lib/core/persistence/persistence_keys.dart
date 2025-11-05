@@ -27,6 +27,7 @@ final class PreferenceKeys {
   static const String ttsEngine = 'tts_engine'; // 'device' | 'server'
   static const String ttsServerVoiceId = 'tts_server_voice_id';
   static const String ttsServerVoiceName = 'tts_server_voice_name';
+  static const String chatStreamingMode = 'chat_streaming_mode';
 }
 
 final class LegacyPreferenceKeys {

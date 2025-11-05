@@ -18,6 +18,7 @@ import '../utils/openwebui_source_parser.dart';
 import 'streaming_response_controller.dart';
 import 'api_service.dart';
 import 'worker_manager.dart';
+import 'platform_service.dart';
 
 // Keep local verbosity toggle for socket logs
 const bool kSocketVerboseLogging = false;
@@ -141,6 +142,8 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
   required SocketService? socketService,
   required WorkerManager workerManager,
   RegisterConversationDeltaListener? registerDeltaListener,
+  bool hapticFeedbackEnabled = true,
+  String chatStreamingMode = 'hybrid',
   // Message update callbacks
   required void Function(String) appendToLastMessage,
   required void Function(String) replaceLastMessageContent,
@@ -163,6 +166,38 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
   required void Function() finishStreaming,
   required List<ChatMessage> Function() getMessages,
 }) {
+  // Log the selected streaming mode
+  final sseEnabled = chatStreamingMode == 'hybrid' || chatStreamingMode == 'sse';
+  final wsEnabled = chatStreamingMode == 'hybrid' || chatStreamingMode == 'ws';
+  DebugLogger.log(
+    '🔌 Streaming mode: $chatStreamingMode | SSE: ${sseEnabled ? "✅" : "❌"} | WebSocket: ${wsEnabled ? "✅" : "❌"}',
+    scope: 'streaming/helper',
+  );
+
+  // Throttled haptic feedback helper
+  DateTime? lastHapticTime;
+  void triggerHapticFeedback() {
+    if (!hapticFeedbackEnabled) return;
+    final now = DateTime.now();
+    if (lastHapticTime != null &&
+        now.difference(lastHapticTime!).inMilliseconds < 200) {
+      return;
+    }
+    lastHapticTime = now;
+    try {
+      PlatformService.hapticFeedback(type: HapticType.selection);
+    } catch (e) {
+      DebugLogger.log(
+        'Haptic feedback failed: $e',
+        scope: 'streaming/helper',
+      );
+    }
+  }
+
+  // Chunk tracking for reduced verbosity logging
+  int chunkCount = 0;
+  int totalChars = 0;
+
   // Persistable controller to survive brief app suspensions
   final persistentController = StreamController<String>.broadcast();
   final persistentService = PersistentStreamingService();
@@ -172,7 +207,17 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
 
   // Create subscription first so we can reference it in onDone
   late final String streamId;
-  final subscription = stream.listen(
+  
+  // Conditionally subscribe to SSE stream based on mode
+  final effectiveStream = sseEnabled ? stream : Stream<String>.empty();
+  if (!sseEnabled) {
+    DebugLogger.log(
+      'Skipping SSE subscription (mode: $chatStreamingMode)',
+      scope: 'streaming/helper',
+    );
+  }
+  
+  final subscription = effectiveStream.listen(
     (data) {
       hasReceivedData = true;
       persistentController.add(data);
@@ -607,6 +652,7 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
                 if (content.isNotEmpty) {
                   appendToLastMessage(content);
                   updateImagesFromCurrentContent();
+                  triggerHapticFeedback();
                 }
               }
             }
@@ -616,6 +662,7 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
             if (raw.isNotEmpty) {
               replaceLastMessageContent(raw);
               updateImagesFromCurrentContent();
+              triggerHapticFeedback();
             }
           }
           if (payload['done'] == true) {
@@ -893,6 +940,7 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
         if (content.isNotEmpty) {
           appendToLastMessage(content);
           updateImagesFromCurrentContent();
+          triggerHapticFeedback();
         }
       } else if ((type == 'chat:message' || type == 'replace') &&
           payload != null) {
@@ -900,6 +948,7 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
         final content = payload['content']?.toString() ?? '';
         if (content.isNotEmpty) {
           replaceLastMessageContent(content);
+          triggerHapticFeedback();
         }
       } else if ((type == 'chat:message:files') && payload != null) {
         // Alias for files event used by web client
@@ -1026,6 +1075,7 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
         if (content.isNotEmpty) {
           appendToLastMessage(content);
           updateImagesFromCurrentContent();
+          triggerHapticFeedback();
         }
       } else {
         // Log unknown event types to catch any follow-up events we might be missing
@@ -1053,6 +1103,7 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
         if (content.isNotEmpty) {
           appendToLastMessage(content);
           updateImagesFromCurrentContent();
+          triggerHapticFeedback();
         }
       } else {
         // Log channel events that might include follow-ups
@@ -1066,7 +1117,15 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
     } catch (_) {}
   }
 
-  if (registerDeltaListener != null) {
+  // Conditionally register WebSocket handlers based on mode
+  if (!wsEnabled) {
+    DebugLogger.log(
+      'Skipping WebSocket subscriptions (mode: $chatStreamingMode)',
+      scope: 'streaming/helper',
+    );
+  }
+
+  if (wsEnabled && registerDeltaListener != null) {
     final chatDisposer = registerDeltaListener(
       request: ConversationDeltaRequest.chat(
         conversationId: activeConversationId,
@@ -1087,7 +1146,7 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
       },
     );
     socketSubscriptions.add(chatDisposer);
-  } else if (socketService != null) {
+  } else if (wsEnabled && socketService != null) {
     final chatSub = socketService.addChatEventHandler(
       conversationId: activeConversationId,
       sessionId: sessionId,
@@ -1096,7 +1155,7 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
     );
     socketSubscriptions.add(chatSub.dispose);
   }
-  if (registerDeltaListener != null) {
+  if (wsEnabled && registerDeltaListener != null) {
     final channelDisposer = registerDeltaListener(
       request: ConversationDeltaRequest.channel(
         conversationId: activeConversationId,
@@ -1117,7 +1176,7 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
       },
     );
     socketSubscriptions.add(channelDisposer);
-  } else if (socketService != null) {
+  } else if (wsEnabled && socketService != null) {
     final channelSub = socketService.addChannelEventHandler(
       conversationId: activeConversationId,
       sessionId: sessionId,
@@ -1161,9 +1220,30 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
       if (effectiveChunk.trim().isNotEmpty) {
         appendToLastMessage(effectiveChunk);
         updateImagesFromCurrentContent();
+        
+        // Track chunks for logging and trigger haptic feedback
+        chunkCount++;
+        totalChars += effectiveChunk.length;
+        triggerHapticFeedback();
+        
+        // Log progress every 20 chunks
+        if (chunkCount % 20 == 0) {
+          DebugLogger.log(
+            'Streaming progress: $chunkCount chunks, $totalChars chars',
+            scope: 'streaming/helper',
+          );
+        }
       }
     },
     onComplete: () {
+      // Log completion summary
+      if (chunkCount > 0) {
+        DebugLogger.log(
+          'Streaming completed: $chunkCount chunks, $totalChars total chars',
+          scope: 'streaming/helper',
+        );
+      }
+      
       api.clearPersistentStreamForMessage(
         assistantMessageId,
         expectedStreamId: streamId,
