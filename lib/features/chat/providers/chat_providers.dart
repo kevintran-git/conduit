@@ -1471,6 +1471,11 @@ Future<void> regenerateMessage(
 
     final registerDeltaListener = createConversationDeltaRegistrar(ref);
 
+    // Read streaming settings
+    final appSettings = ref.read(appSettingsProvider);
+    final hapticFeedbackEnabled = appSettings.hapticFeedback;
+    final chatStreamingMode = appSettings.chatStreamingMode;
+
     final activeStream = attachUnifiedChunkedStreaming(
       stream: stream,
       webSearchEnabled: webSearchEnabled,
@@ -1483,6 +1488,8 @@ Future<void> regenerateMessage(
       socketService: socketService,
       workerManager: ref.read(workerManagerProvider),
       registerDeltaListener: registerDeltaListener,
+      hapticFeedbackEnabled: hapticFeedbackEnabled,
+      chatStreamingMode: chatStreamingMode,
       appendToLastMessage: (c) =>
           ref.read(chatMessagesProvider.notifier).appendToLastMessage(c),
       replaceLastMessageContent: (c) =>
@@ -2038,6 +2045,11 @@ Future<void> _sendMessageInternal(
 
     final registerDeltaListener = createConversationDeltaRegistrar(ref);
 
+    // Read streaming settings
+    final appSettings = ref.read(appSettingsProvider);
+    final hapticFeedbackEnabled = appSettings.hapticFeedback;
+    final chatStreamingMode = appSettings.chatStreamingMode;
+
     final activeStream = attachUnifiedChunkedStreaming(
       stream: stream,
       webSearchEnabled: webSearchEnabled,
@@ -2050,6 +2062,8 @@ Future<void> _sendMessageInternal(
       socketService: socketService,
       workerManager: ref.read(workerManagerProvider),
       registerDeltaListener: registerDeltaListener,
+      hapticFeedbackEnabled: hapticFeedbackEnabled,
+      chatStreamingMode: chatStreamingMode,
       appendToLastMessage: (c) =>
           ref.read(chatMessagesProvider.notifier).appendToLastMessage(c),
       replaceLastMessageContent: (c) =>

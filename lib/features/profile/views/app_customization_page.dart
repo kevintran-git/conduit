@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/services/settings_service.dart';
+import '../../../core/services/platform_service.dart';
 import '../../../shared/theme/theme_extensions.dart';
 import '../../../shared/theme/tweakcn_themes.dart';
 import '../../tools/providers/tools_providers.dart';
@@ -463,6 +464,52 @@ class AppCustomizationPage extends ConsumerWidget {
           onTap: () => ref
               .read(appSettingsProvider.notifier)
               .setSendOnEnter(!settings.sendOnEnter),
+        ),
+        const SizedBox(height: Spacing.sm),
+        _CustomizationTile(
+          leading: _buildIconBadge(
+            context,
+            Platform.isIOS ? CupertinoIcons.waveform : Icons.vibration,
+            color: theme.buttonPrimary,
+          ),
+          title: l10n.hapticFeedback,
+          subtitle: l10n.hapticFeedbackDescription,
+          trailing: Switch.adaptive(
+            value: settings.hapticFeedback,
+            onChanged: (value) {
+              ref.read(appSettingsProvider.notifier).setHapticFeedback(value);
+              // Trigger haptic on enable to confirm
+              if (value) {
+                PlatformService.hapticFeedback(type: HapticType.selection);
+              }
+            },
+          ),
+          showChevron: false,
+          onTap: () {
+            final newValue = !settings.hapticFeedback;
+            ref.read(appSettingsProvider.notifier).setHapticFeedback(newValue);
+            if (newValue) {
+              PlatformService.hapticFeedback(type: HapticType.selection);
+            }
+          },
+        ),
+        const SizedBox(height: Spacing.sm),
+        _CustomizationTile(
+          leading: _buildIconBadge(
+            context,
+            Platform.isIOS
+                ? CupertinoIcons.arrow_2_circlepath_circle
+                : Icons.stream,
+            color: theme.buttonPrimary,
+          ),
+          title: l10n.chatStreamingMode,
+          subtitle: _getChatStreamingModeLabel(l10n, settings.chatStreamingMode),
+          trailing: _buildValueBadge(
+            context,
+            _getChatStreamingModeLabel(l10n, settings.chatStreamingMode),
+          ),
+          onTap: () => _showChatStreamingModeSheet(context, ref, settings),
+          showChevron: true,
         ),
       ],
     );
@@ -1267,6 +1314,130 @@ class AppCustomizationPage extends ConsumerWidget {
       default:
         return AppLocalizations.of(context)!.system;
     }
+  }
+
+  String _getChatStreamingModeLabel(
+    AppLocalizations l10n,
+    String mode,
+  ) {
+    switch (mode) {
+      case 'ws':
+        return l10n.chatStreamingModeWs;
+      case 'sse':
+        return l10n.chatStreamingModeSse;
+      case 'hybrid':
+      default:
+        return l10n.chatStreamingModeHybrid;
+    }
+  }
+
+  Future<void> _showChatStreamingModeSheet(
+    BuildContext context,
+    WidgetRef ref,
+    AppSettings settings,
+  ) async {
+    final theme = context.conduitTheme;
+    final l10n = AppLocalizations.of(context)!;
+    var current = settings.chatStreamingMode;
+
+    final options = <({String value, String title})>[
+      (value: 'hybrid', title: l10n.chatStreamingModeHybrid),
+      (value: 'ws', title: l10n.chatStreamingModeWs),
+      (value: 'sse', title: l10n.chatStreamingModeSse),
+    ];
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: theme.sidebarBackground,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(AppBorderRadius.modal),
+        ),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: Spacing.lg,
+                  vertical: Spacing.md,
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        l10n.chatStreamingMode,
+                        style:
+                            theme.headingSmall?.copyWith(
+                              color: theme.sidebarForeground,
+                            ) ??
+                            TextStyle(
+                              color: theme.sidebarForeground,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w600,
+                            ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: Icon(Icons.close, color: theme.iconPrimary),
+                      onPressed: () => Navigator.of(sheetContext).pop(),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              for (var i = 0; i < options.length; i++) ...[
+                () {
+                  final option = options[i];
+                  final selected = current == option.value;
+                  return InkWell(
+                    onTap: () {
+                      ref
+                          .read(appSettingsProvider.notifier)
+                          .setChatStreamingMode(option.value);
+                      Navigator.of(sheetContext).pop();
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: Spacing.lg,
+                        vertical: Spacing.md,
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              option.title,
+                              style: TextStyle(
+                                color: selected
+                                    ? theme.buttonPrimary
+                                    : theme.sidebarForeground,
+                                fontWeight:
+                                    selected ? FontWeight.w600 : FontWeight.normal,
+                              ),
+                            ),
+                          ),
+                          if (selected)
+                            Icon(
+                              Icons.check,
+                              color: theme.buttonPrimary,
+                              size: 20,
+                            ),
+                        ],
+                      ),
+                    ),
+                  );
+                }(),
+                if (i < options.length - 1) const Divider(height: 1),
+              ],
+              const SizedBox(height: Spacing.md),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _showTransportModeSheet(
