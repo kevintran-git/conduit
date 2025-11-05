@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../core/models/chat_message.dart';
 import '../../core/models/socket_event.dart';
@@ -18,6 +19,7 @@ import '../utils/openwebui_source_parser.dart';
 import 'streaming_response_controller.dart';
 import 'api_service.dart';
 import 'worker_manager.dart';
+import 'platform_service.dart';
 
 // Keep local verbosity toggle for socket logs
 const bool kSocketVerboseLogging = false;
@@ -140,6 +142,8 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
   required ApiService api,
   required SocketService? socketService,
   required WorkerManager workerManager,
+  bool hapticFeedbackEnabled = true,
+  String chatStreamingMode = 'hybrid', // 'hybrid', 'ws', or 'sse'
   RegisterConversationDeltaListener? registerDeltaListener,
   // Message update callbacks
   required void Function(String) appendToLastMessage,
@@ -167,12 +171,68 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
   final persistentController = StreamController<String>.broadcast();
   final persistentService = PersistentStreamingService();
 
+  // Log streaming mode for debugging (clear, one-time log)
+  final sseActive = chatStreamingMode != 'ws';
+  final wsActive = chatStreamingMode != 'sse';
+  DebugLogger.log(
+    '🔌 Streaming mode: $chatStreamingMode | SSE: ${sseActive ? "✅" : "❌"} | WebSocket: ${wsActive ? "✅" : "❌"}',
+    scope: 'streaming/start',
+  );
+
   // Track if stream has received any data
   bool hasReceivedData = false;
 
+  // Track last haptic feedback time to avoid over-triggering
+  DateTime? lastHapticTime;
+  const hapticThrottleDuration = Duration(milliseconds: 200);
+  int _hapticTriggerCount = 0;
+  
+  // Track chunks for summary logging (reduce verbosity)
+  int _chunkCount = 0;
+  int _totalCharsReceived = 0;
+
+  // Helper to trigger haptic feedback with throttling
+  void triggerHapticFeedback() {
+    if (!hapticFeedbackEnabled) {
+      DebugLogger.log(
+        'Haptic feedback disabled by user',
+        scope: 'streaming/haptic',
+      );
+      return;
+    }
+
+    final now = DateTime.now();
+    if (lastHapticTime == null ||
+        now.difference(lastHapticTime!) > hapticThrottleDuration) {
+      lastHapticTime = now;
+      _hapticTriggerCount++;
+      
+      DebugLogger.log(
+        'Triggering haptic feedback (#$_hapticTriggerCount)',
+        scope: 'streaming/haptic',
+      );
+      
+      try {
+        PlatformService.hapticFeedback(type: HapticType.selection);
+      } catch (e) {
+        DebugLogger.error(
+          'haptic-feedback-failed',
+          scope: 'streaming/haptic',
+          error: e,
+        );
+      }
+    }
+  }
+
   // Create subscription first so we can reference it in onDone
   late final String streamId;
-  final subscription = stream.listen(
+  
+  // Use appropriate stream based on mode
+  final Stream<String> effectiveStream = chatStreamingMode == 'ws' 
+      ? Stream<String>.empty() // No SSE in WebSocket-only mode
+      : stream;
+  
+  final subscription = effectiveStream.listen(
     (data) {
       hasReceivedData = true;
       persistentController.add(data);
@@ -196,9 +256,20 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
           return;
         }
         
-        // In foreground: wait a bit then check if backend completed
-        // This is like doing a manual reload
-        await Future.delayed(const Duration(seconds: 1));
+        // In foreground: wait for backend to have a chance to complete
+        // LLM responses typically take 5-30+ seconds, so give it time
+        await Future.delayed(const Duration(seconds: 3));
+        
+        // Check if content already arrived via another channel (WebSocket, recovery)
+        final currentMsgs = getMessages();
+        if (currentMsgs.isNotEmpty && 
+            currentMsgs.last.role == 'assistant' &&
+            currentMsgs.last.content.trim().isNotEmpty) {
+          DebugLogger.stream('Content already present - no need to fetch');
+          finishStreaming();
+          persistentController.close();
+          return;
+        }
         
         // Use microtask since refreshConversationSnapshot is defined later
         Future.microtask(() async {
@@ -226,8 +297,9 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
                 if (assistant != null && assistant.content.trim().isNotEmpty) {
                   DebugLogger.stream('Backend had completed - recovered content');
                   replaceLastMessageContent(assistant.content);
+                  triggerHapticFeedback();
                   setFollowUps(assistant.id, assistant.followUps);
-                  updateMessageById(assistant.id, (current) {
+                  updateMessageById(assistant.id, (ChatMessage current) {
                     return current.copyWith(
                       followUps: List<String>.from(assistant.followUps),
                       statusHistory: assistant.statusHistory,
@@ -284,6 +356,22 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
         'Stream interrupted - checking if backend completed',
         scope: 'streaming/helper',
       );
+      
+      // Wait a bit before fetching - backend might still be processing
+      // This is called by PersistentStreamingService which already does exponential backoff,
+      // but add a small delay to avoid fetching too eagerly
+      await Future.delayed(const Duration(seconds: 2));
+      
+      // Check if content already arrived via another channel
+      final currentMsgs = getMessages();
+      if (currentMsgs.isNotEmpty && 
+          currentMsgs.last.role == 'assistant' &&
+          currentMsgs.last.content.trim().isNotEmpty) {
+        DebugLogger.log('Content already present - skipping recovery fetch', scope: 'streaming/helper');
+        finishStreaming();
+        return;
+      }
+      
       // Simple recovery: fetch conversation and update message (like a manual reload)
       try {
         final chatId = activeConversationId;
@@ -307,9 +395,10 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
             if (assistant != null) {
               if (assistant.content.trim().isNotEmpty) {
                 replaceLastMessageContent(assistant.content);
+                triggerHapticFeedback();
               }
               setFollowUps(assistant.id, assistant.followUps);
-              updateMessageById(assistant.id, (current) {
+              updateMessageById(assistant.id, (ChatMessage current) {
                 return current.copyWith(
                   followUps: List<String>.from(assistant.followUps),
                   statusHistory: assistant.statusHistory,
@@ -634,6 +723,7 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
                   final content = delta['content']?.toString() ?? '';
                   if (content.isNotEmpty) {
                     appendToLastMessage(content);
+                    triggerHapticFeedback();
                     updateImagesFromCurrentContent();
                   }
                 }
@@ -641,12 +731,14 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
             } catch (_) {
               if (s.isNotEmpty) {
                 appendToLastMessage(s);
+                triggerHapticFeedback();
                 updateImagesFromCurrentContent();
               }
             }
           } else {
             if (s.isNotEmpty) {
               appendToLastMessage(s);
+              triggerHapticFeedback();
               updateImagesFromCurrentContent();
             }
           }
@@ -790,6 +882,7 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
             final raw = payload['content']?.toString() ?? '';
             if (raw.isNotEmpty) {
               replaceLastMessageContent(raw);
+              triggerHapticFeedback();
               updateImagesFromCurrentContent();
             }
           }
@@ -870,6 +963,7 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
                       }
                       if (content.isNotEmpty) {
                         replaceLastMessageContent(content);
+                        triggerHapticFeedback();
                       }
                     }
                   } catch (_) {
@@ -1067,6 +1161,7 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
         final content = payload['content']?.toString() ?? '';
         if (content.isNotEmpty) {
           appendToLastMessage(content);
+          triggerHapticFeedback();
           updateImagesFromCurrentContent();
         }
       } else if ((type == 'chat:message' || type == 'replace') &&
@@ -1075,6 +1170,7 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
         final content = payload['content']?.toString() ?? '';
         if (content.isNotEmpty) {
           replaceLastMessageContent(content);
+          triggerHapticFeedback();
         }
       } else if ((type == 'chat:message:files') && payload != null) {
         // Alias for files event used by web client
@@ -1200,6 +1296,7 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
         final content = payload['content']?.toString() ?? '';
         if (content.isNotEmpty) {
           appendToLastMessage(content);
+          triggerHapticFeedback();
           updateImagesFromCurrentContent();
         }
       } else {
@@ -1241,70 +1338,89 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
     } catch (_) {}
   }
 
-  if (registerDeltaListener != null) {
-    final chatDisposer = registerDeltaListener(
-      request: ConversationDeltaRequest.chat(
+  // Register WebSocket event handlers unless SSE-only mode
+  if (chatStreamingMode != 'sse') {
+    if (registerDeltaListener != null) {
+      final chatDisposer = registerDeltaListener(
+        request: ConversationDeltaRequest.chat(
+          conversationId: activeConversationId,
+          sessionId: sessionId,
+          requireFocus: false,
+        ),
+        onDelta: (event) {
+          socketWatchdog?.ping();
+          chatHandler(event.raw, event.ack);
+        },
+        onError: (error, stackTrace) {
+          DebugLogger.error(
+            'Chat delta listener error',
+            scope: 'streaming/helper',
+            error: error,
+            stackTrace: stackTrace,
+          );
+        },
+      );
+      socketSubscriptions.add(chatDisposer);
+    } else if (socketService != null) {
+      final chatSub = socketService.addChatEventHandler(
         conversationId: activeConversationId,
         sessionId: sessionId,
         requireFocus: false,
-      ),
-      onDelta: (event) {
-        socketWatchdog?.ping();
-        chatHandler(event.raw, event.ack);
-      },
-      onError: (error, stackTrace) {
-        DebugLogger.error(
-          'Chat delta listener error',
-          scope: 'streaming/helper',
-          error: error,
-          stackTrace: stackTrace,
-        );
-      },
-    );
-    socketSubscriptions.add(chatDisposer);
-  } else if (socketService != null) {
-    final chatSub = socketService.addChatEventHandler(
-      conversationId: activeConversationId,
-      sessionId: sessionId,
-      requireFocus: false,
-      handler: chatHandler,
-    );
-    socketSubscriptions.add(chatSub.dispose);
-  }
-  if (registerDeltaListener != null) {
-    final channelDisposer = registerDeltaListener(
-      request: ConversationDeltaRequest.channel(
+        handler: chatHandler,
+      );
+      socketSubscriptions.add(chatSub.dispose);
+    }
+    if (registerDeltaListener != null) {
+      final channelDisposer = registerDeltaListener(
+        request: ConversationDeltaRequest.channel(
+          conversationId: activeConversationId,
+          sessionId: sessionId,
+          requireFocus: false,
+        ),
+        onDelta: (event) {
+          socketWatchdog?.ping();
+          channelEventsHandler(event.raw, event.ack);
+        },
+        onError: (error, stackTrace) {
+          DebugLogger.error(
+            'Channel delta listener error',
+            scope: 'streaming/helper',
+            error: error,
+            stackTrace: stackTrace,
+          );
+        },
+      );
+      socketSubscriptions.add(channelDisposer);
+    } else if (socketService != null) {
+      final channelSub = socketService.addChannelEventHandler(
         conversationId: activeConversationId,
         sessionId: sessionId,
         requireFocus: false,
-      ),
-      onDelta: (event) {
-        socketWatchdog?.ping();
-        channelEventsHandler(event.raw, event.ack);
-      },
-      onError: (error, stackTrace) {
-        DebugLogger.error(
-          'Channel delta listener error',
-          scope: 'streaming/helper',
-          error: error,
-          stackTrace: stackTrace,
-        );
-      },
+        handler: channelEventsHandler,
+      );
+      socketSubscriptions.add(channelSub.dispose);
+    }
+  } else {
+    DebugLogger.log(
+      'Skipping WebSocket subscriptions (SSE-only mode)',
+      scope: 'streaming/helper',
     );
-    socketSubscriptions.add(channelDisposer);
-  } else if (socketService != null) {
-    final channelSub = socketService.addChannelEventHandler(
-      conversationId: activeConversationId,
-      sessionId: sessionId,
-      requireFocus: false,
-      handler: channelEventsHandler,
-    );
-    socketSubscriptions.add(channelSub.dispose);
   }
 
   final controller = StreamingResponseController(
     stream: persistentController.stream,
     onChunk: (chunk) {
+      _chunkCount++;
+      _totalCharsReceived += chunk.length;
+      
+      // Log summary every 20 chunks instead of every chunk
+      if (_chunkCount % 20 == 0) {
+        DebugLogger.log(
+          'Streaming progress: $_chunkCount chunks, $_totalCharsReceived chars',
+          scope: 'streaming/progress',
+        );
+      }
+      
       var effectiveChunk = chunk;
       if (webSearchEnabled && !isSearching) {
         if (chunk.contains('[SEARCHING]') ||
@@ -1335,10 +1451,17 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
 
       if (effectiveChunk.trim().isNotEmpty) {
         appendToLastMessage(effectiveChunk);
+        triggerHapticFeedback();
         updateImagesFromCurrentContent();
       }
     },
     onComplete: () {
+      // Log streaming summary
+      DebugLogger.log(
+        'Streaming completed: $_chunkCount chunks, $_totalCharsReceived total chars',
+        scope: 'streaming/summary',
+      );
+      
       api.clearPersistentStreamForMessage(
         assistantMessageId,
         expectedStreamId: streamId,
@@ -1396,8 +1519,17 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
       }
 
       // Before giving up, check if backend completed (like a manual reload)
-      await Future.delayed(const Duration(milliseconds: 500));
-      await refreshConversationSnapshot();
+      // But only if we don't already have content
+      final currentMsgs = getMessages();
+      if (currentMsgs.isNotEmpty && 
+          currentMsgs.last.role == 'assistant' &&
+          currentMsgs.last.content.trim().isNotEmpty) {
+        DebugLogger.stream('Content already present after error - no fetch needed');
+      } else {
+        // Wait a bit to give backend time to finish processing
+        await Future.delayed(const Duration(seconds: 2));
+        await refreshConversationSnapshot();
+      }
 
       disposeSocketSubscriptions();
       finishStreaming();

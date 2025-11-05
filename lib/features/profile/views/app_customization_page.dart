@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/services/settings_service.dart';
+import '../../../core/services/platform_service.dart';
 import '../../../shared/theme/theme_extensions.dart';
 import '../../../shared/theme/tweakcn_themes.dart';
 import '../../tools/providers/tools_providers.dart';
@@ -449,6 +450,8 @@ class AppCustomizationPage extends ConsumerWidget {
               transportAvailability.allowWebsocketOnly,
         ),
         const SizedBox(height: Spacing.sm),
+        _buildChatStreamingModeTile(context, ref, settings),
+        const SizedBox(height: Spacing.sm),
         _CustomizationTile(
           leading: _buildIconBadge(
             context,
@@ -466,6 +469,38 @@ class AppCustomizationPage extends ConsumerWidget {
           onTap: () => ref
               .read(appSettingsProvider.notifier)
               .setSendOnEnter(!settings.sendOnEnter),
+        ),
+        const SizedBox(height: Spacing.sm),
+        _CustomizationTile(
+          leading: _buildIconBadge(
+            context,
+            UiUtils.platformIcon(
+              ios: CupertinoIcons.device_phone_portrait,
+              android: Icons.vibration,
+            ),
+            color: theme.buttonPrimary,
+          ),
+          title: l10n.hapticFeedback,
+          subtitle: l10n.hapticFeedbackDescription,
+          trailing: Switch.adaptive(
+            value: settings.hapticFeedback,
+            onChanged: (value) {
+              ref.read(appSettingsProvider.notifier).setHapticFeedback(value);
+              // Give immediate feedback when enabling
+              if (value) {
+                PlatformService.hapticFeedback(type: HapticType.selection);
+              }
+            },
+          ),
+          showChevron: false,
+          onTap: () {
+            final newValue = !settings.hapticFeedback;
+            ref.read(appSettingsProvider.notifier).setHapticFeedback(newValue);
+            // Give immediate feedback when enabling
+            if (newValue) {
+              PlatformService.hapticFeedback(type: HapticType.selection);
+            }
+          },
         ),
       ],
     );
@@ -1772,6 +1807,148 @@ class AppCustomizationPage extends ConsumerWidget {
                         ref
                             .read(appSettingsProvider.notifier)
                             .setSocketTransportMode(option.value);
+                      }
+                      Navigator.of(sheetContext).pop();
+                    },
+                  );
+                }(),
+                if (i != options.length - 1) const Divider(height: 1),
+              ],
+              const SizedBox(height: Spacing.lg),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildChatStreamingModeTile(
+    BuildContext context,
+    WidgetRef ref,
+    AppSettings settings,
+  ) {
+    final theme = context.conduitTheme;
+    final l10n = AppLocalizations.of(context)!;
+    final chatStreamingMode = settings.chatStreamingMode;
+    String chatStreamingLabel;
+    switch (chatStreamingMode) {
+      case 'ws':
+        chatStreamingLabel = l10n.chatStreamingModeWs;
+        break;
+      case 'sse':
+        chatStreamingLabel = l10n.chatStreamingModeSse;
+        break;
+      case 'hybrid':
+      default:
+        chatStreamingLabel = l10n.chatStreamingModeHybrid;
+        break;
+    }
+
+    return _CustomizationTile(
+      leading: _buildIconBadge(
+        context,
+        UiUtils.platformIcon(
+          ios: CupertinoIcons.arrow_2_squarepath,
+          android: Icons.stream,
+        ),
+        color: theme.buttonPrimary,
+      ),
+      title: l10n.chatStreamingMode,
+      subtitle: chatStreamingLabel,
+      trailing: _buildValueBadge(context, chatStreamingLabel),
+      onTap: () => _showChatStreamingModeSheet(context, ref, settings),
+      showChevron: true,
+    );
+  }
+
+  Future<void> _showChatStreamingModeSheet(
+    BuildContext context,
+    WidgetRef ref,
+    AppSettings settings,
+  ) async {
+    final theme = context.conduitTheme;
+    final l10n = AppLocalizations.of(context)!;
+    var current = settings.chatStreamingMode;
+
+    final options = [
+      (
+        value: 'hybrid',
+        title: l10n.chatStreamingModeHybrid,
+        subtitle: l10n.chatStreamingModeHybridInfo,
+      ),
+      (
+        value: 'ws',
+        title: l10n.chatStreamingModeWs,
+        subtitle: l10n.chatStreamingModeWsInfo,
+      ),
+      (
+        value: 'sse',
+        title: l10n.chatStreamingModeSse,
+        subtitle: l10n.chatStreamingModeSseInfo,
+      ),
+    ];
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: theme.sidebarBackground,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(AppBorderRadius.modal),
+        ),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: Spacing.lg,
+                  vertical: Spacing.md,
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        l10n.chatStreamingMode,
+                        style:
+                            theme.headingSmall?.copyWith(
+                              color: theme.sidebarForeground,
+                            ) ??
+                            TextStyle(
+                              color: theme.sidebarForeground,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w600,
+                            ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: Icon(Icons.close, color: theme.iconPrimary),
+                      onPressed: () => Navigator.of(sheetContext).pop(),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              for (var i = 0; i < options.length; i++) ...[
+                () {
+                  final option = options[i];
+                  final selected = current == option.value;
+                  return ListTile(
+                    leading: Icon(
+                      selected ? Icons.check_circle : Icons.circle_outlined,
+                      color: selected
+                          ? theme.buttonPrimary
+                          : theme.iconSecondary,
+                    ),
+                    title: Text(option.title),
+                    subtitle: Text(option.subtitle),
+                    onTap: () {
+                      if (!selected) {
+                        ref
+                            .read(appSettingsProvider.notifier)
+                            .setChatStreamingMode(option.value);
                       }
                       Navigator.of(sheetContext).pop();
                     },

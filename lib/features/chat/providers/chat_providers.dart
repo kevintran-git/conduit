@@ -12,6 +12,7 @@ import '../../../core/models/chat_message.dart';
 import '../../../core/models/conversation.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../../core/services/conversation_delta_listener.dart';
+import '../../../core/services/settings_service.dart';
 import '../../../core/services/streaming_helper.dart';
 import '../../../core/services/streaming_response_controller.dart';
 import '../../../core/services/worker_manager.dart';
@@ -1102,6 +1103,109 @@ Future<Map<String, dynamic>> _buildMessagePayloadWithAttachments({
   return messageMap;
 }
 
+/// Shared helper to setup streaming with consistent configuration
+/// Eliminates code duplication between send and regenerate flows
+ActiveSocketStream _setupStreamingForMessage({
+  required dynamic ref,
+  required Stream<String> stream,
+  required bool webSearchEnabled,
+  required String assistantMessageId,
+  required String modelId,
+  required Map<String, dynamic> modelItem,
+  required String? sessionId,
+  required String? conversationId,
+  required dynamic api,
+  required String flowType, // 'send' or 'regenerate'
+}) {
+  // Get socket service - it's already AsyncData, just access .value
+  final socketService = ref.read(socketServiceManagerProvider).value;
+  final registerDeltaListener = createConversationDeltaRegistrar(ref);
+  final appSettings = ref.read(appSettingsProvider);
+  final hapticEnabled = appSettings.hapticFeedback;
+  final chatStreamingMode = appSettings.chatStreamingMode;
+  
+  DebugLogger.log(
+    'Starting $flowType with haptic: $hapticEnabled, mode: $chatStreamingMode',
+    scope: 'chat/$flowType',
+  );
+
+  return attachUnifiedChunkedStreaming(
+    stream: stream,
+    webSearchEnabled: webSearchEnabled,
+    assistantMessageId: assistantMessageId,
+    modelId: modelId,
+    modelItem: modelItem,
+    sessionId: sessionId,
+    activeConversationId: conversationId,
+    api: api,
+    socketService: socketService,
+    workerManager: ref.read(workerManagerProvider),
+    hapticFeedbackEnabled: hapticEnabled,
+    chatStreamingMode: chatStreamingMode,
+    registerDeltaListener: registerDeltaListener,
+    appendToLastMessage: (c) =>
+        ref.read(chatMessagesProvider.notifier).appendToLastMessage(c),
+    replaceLastMessageContent: (c) =>
+        ref.read(chatMessagesProvider.notifier).replaceLastMessageContent(c),
+    updateLastMessageWith: (updater) => ref
+        .read(chatMessagesProvider.notifier)
+        .updateLastMessageWithFunction(updater),
+    appendStatusUpdate: (messageId, update) => ref
+        .read(chatMessagesProvider.notifier)
+        .appendStatusUpdate(messageId, update),
+    setFollowUps: (messageId, followUps) => ref
+        .read(chatMessagesProvider.notifier)
+        .setFollowUps(messageId, followUps),
+    upsertCodeExecution: (messageId, execution) => ref
+        .read(chatMessagesProvider.notifier)
+        .upsertCodeExecution(messageId, execution),
+    appendSourceReference: (messageId, reference) => ref
+        .read(chatMessagesProvider.notifier)
+        .appendSourceReference(messageId, reference),
+    updateMessageById: (messageId, updater) => ref
+        .read(chatMessagesProvider.notifier)
+        .updateMessageById(messageId, updater),
+    onChatTitleUpdated: (newTitle) {
+      final active = ref.read(activeConversationProvider);
+      if (active != null) {
+        ref
+            .read(activeConversationProvider.notifier)
+            .set(active.copyWith(title: newTitle));
+        ref
+            .read(conversationsProvider.notifier)
+            .updateConversation(
+              active.id,
+              (conversation) => conversation.copyWith(
+                title: newTitle,
+                updatedAt: DateTime.now(),
+              ),
+            );
+      }
+      refreshConversationsCache(ref);
+    },
+    onChatTagsUpdated: () {
+      refreshConversationsCache(ref);
+      final active = ref.read(activeConversationProvider);
+      final api = ref.read(apiServiceProvider);
+      if (active != null && api != null) {
+        Future.microtask(() async {
+          try {
+            final refreshed = await api.getConversation(active.id);
+            ref.read(activeConversationProvider.notifier).set(refreshed);
+            ref
+                .read(conversationsProvider.notifier)
+                .upsertConversation(refreshed.copyWith(messages: const []));
+          } catch (_) {}
+        });
+      }
+    },
+    finishStreaming: () {
+      ref.read(chatMessagesProvider.notifier).finishStreaming();
+    },
+    getMessages: () => ref.read(chatMessagesProvider),
+  );
+}
+
 // Regenerate message function that doesn't duplicate user message
 Future<void> regenerateMessage(
   dynamic ref,
@@ -1462,79 +1566,18 @@ Future<void> regenerateMessage(
       });
     } catch (_) {}
 
-    final registerDeltaListener = createConversationDeltaRegistrar(ref);
-
-    final activeStream = attachUnifiedChunkedStreaming(
+    // Use shared helper to setup streaming (eliminates duplication)
+    final activeStream = _setupStreamingForMessage(
+      ref: ref,
       stream: stream,
       webSearchEnabled: webSearchEnabled,
       assistantMessageId: assistantMessageId,
       modelId: selectedModel.id,
       modelItem: modelItem,
       sessionId: effectiveSessionId,
-      activeConversationId: activeConversation.id,
+      conversationId: activeConversation.id,
       api: api!,
-      socketService: socketService,
-      workerManager: ref.read(workerManagerProvider),
-      registerDeltaListener: registerDeltaListener,
-      appendToLastMessage: (c) =>
-          ref.read(chatMessagesProvider.notifier).appendToLastMessage(c),
-      replaceLastMessageContent: (c) =>
-          ref.read(chatMessagesProvider.notifier).replaceLastMessageContent(c),
-      updateLastMessageWith: (updater) => ref
-          .read(chatMessagesProvider.notifier)
-          .updateLastMessageWithFunction(updater),
-      appendStatusUpdate: (messageId, update) => ref
-          .read(chatMessagesProvider.notifier)
-          .appendStatusUpdate(messageId, update),
-      setFollowUps: (messageId, followUps) => ref
-          .read(chatMessagesProvider.notifier)
-          .setFollowUps(messageId, followUps),
-      upsertCodeExecution: (messageId, execution) => ref
-          .read(chatMessagesProvider.notifier)
-          .upsertCodeExecution(messageId, execution),
-      appendSourceReference: (messageId, reference) => ref
-          .read(chatMessagesProvider.notifier)
-          .appendSourceReference(messageId, reference),
-      updateMessageById: (messageId, updater) => ref
-          .read(chatMessagesProvider.notifier)
-          .updateMessageById(messageId, updater),
-      onChatTitleUpdated: (newTitle) {
-        final active = ref.read(activeConversationProvider);
-        if (active != null) {
-          ref
-              .read(activeConversationProvider.notifier)
-              .set(active.copyWith(title: newTitle));
-          ref
-              .read(conversationsProvider.notifier)
-              .updateConversation(
-                active.id,
-                (conversation) => conversation.copyWith(
-                  title: newTitle,
-                  updatedAt: DateTime.now(),
-                ),
-              );
-        }
-        refreshConversationsCache(ref);
-      },
-      onChatTagsUpdated: () {
-        refreshConversationsCache(ref);
-        final active = ref.read(activeConversationProvider);
-        final api = ref.read(apiServiceProvider);
-        if (active != null && api != null) {
-          Future.microtask(() async {
-            try {
-              final refreshed = await api.getConversation(active.id);
-              ref.read(activeConversationProvider.notifier).set(refreshed);
-              ref
-                  .read(conversationsProvider.notifier)
-                  .upsertConversation(refreshed.copyWith(messages: const []));
-            } catch (_) {}
-          });
-        }
-      },
-      finishStreaming: () =>
-          ref.read(chatMessagesProvider.notifier).finishStreaming(),
-      getMessages: () => ref.read(chatMessagesProvider),
+      flowType: 'regenerate',
     );
     ref.read(chatMessagesProvider.notifier)
       ..setMessageStream(activeStream.controller)
@@ -2029,79 +2072,18 @@ Future<void> _sendMessageInternal(
       });
     } catch (_) {}
 
-    final registerDeltaListener = createConversationDeltaRegistrar(ref);
-
-    final activeStream = attachUnifiedChunkedStreaming(
+    // Use shared helper to setup streaming (eliminates duplication)
+    final activeStream = _setupStreamingForMessage(
+      ref: ref,
       stream: stream,
       webSearchEnabled: webSearchEnabled,
       assistantMessageId: assistantMessageId,
       modelId: selectedModel.id,
       modelItem: modelItem,
       sessionId: effectiveSessionId,
-      activeConversationId: activeConversation?.id,
+      conversationId: activeConversation?.id,
       api: api!,
-      socketService: socketService,
-      workerManager: ref.read(workerManagerProvider),
-      registerDeltaListener: registerDeltaListener,
-      appendToLastMessage: (c) =>
-          ref.read(chatMessagesProvider.notifier).appendToLastMessage(c),
-      replaceLastMessageContent: (c) =>
-          ref.read(chatMessagesProvider.notifier).replaceLastMessageContent(c),
-      updateLastMessageWith: (updater) => ref
-          .read(chatMessagesProvider.notifier)
-          .updateLastMessageWithFunction(updater),
-      appendStatusUpdate: (messageId, update) => ref
-          .read(chatMessagesProvider.notifier)
-          .appendStatusUpdate(messageId, update),
-      setFollowUps: (messageId, followUps) => ref
-          .read(chatMessagesProvider.notifier)
-          .setFollowUps(messageId, followUps),
-      upsertCodeExecution: (messageId, execution) => ref
-          .read(chatMessagesProvider.notifier)
-          .upsertCodeExecution(messageId, execution),
-      appendSourceReference: (messageId, reference) => ref
-          .read(chatMessagesProvider.notifier)
-          .appendSourceReference(messageId, reference),
-      updateMessageById: (messageId, updater) => ref
-          .read(chatMessagesProvider.notifier)
-          .updateMessageById(messageId, updater),
-      onChatTitleUpdated: (newTitle) {
-        final active = ref.read(activeConversationProvider);
-        if (active != null) {
-          ref
-              .read(activeConversationProvider.notifier)
-              .set(active.copyWith(title: newTitle));
-          ref
-              .read(conversationsProvider.notifier)
-              .updateConversation(
-                active.id,
-                (conversation) => conversation.copyWith(
-                  title: newTitle,
-                  updatedAt: DateTime.now(),
-                ),
-              );
-        }
-        refreshConversationsCache(ref);
-      },
-      onChatTagsUpdated: () {
-        refreshConversationsCache(ref);
-        final active = ref.read(activeConversationProvider);
-        final api = ref.read(apiServiceProvider);
-        if (active != null && api != null) {
-          Future.microtask(() async {
-            try {
-              final refreshed = await api.getConversation(active.id);
-              ref.read(activeConversationProvider.notifier).set(refreshed);
-              ref
-                  .read(conversationsProvider.notifier)
-                  .upsertConversation(refreshed.copyWith(messages: const []));
-            } catch (_) {}
-          });
-        }
-      },
-      finishStreaming: () =>
-          ref.read(chatMessagesProvider.notifier).finishStreaming(),
-      getMessages: () => ref.read(chatMessagesProvider),
+      flowType: 'send',
     );
 
     ref.read(chatMessagesProvider.notifier)
@@ -2111,69 +2093,37 @@ Future<void> _sendMessageInternal(
         onDispose: activeStream.disposeWatchdog,
       );
     return;
-  } catch (e) {
+  } catch (e, stackTrace) {
     // Handle error - remove the assistant message placeholder
     ref.read(chatMessagesProvider.notifier).removeLastMessage();
 
-    // Add user-friendly error message instead of rethrowing
-    if (e.toString().contains('400')) {
-      final errorMessage = ChatMessage(
-        id: const Uuid().v4(),
-        role: 'assistant',
-        content:
-            '''⚠️ There was an issue with the message format. This might be because:
+    // Log all errors for debugging
+    DebugLogger.error(
+      'send-message-failed',
+      scope: 'chat/send',
+      error: e,
+      stackTrace: stackTrace,
+    );
 
-• The image attachment couldn't be processed
-• The request format is incompatible with the selected model
-• The message contains unsupported content
-
-Please try sending the message again, or try without attachments.''',
-        timestamp: DateTime.now(),
-        isStreaming: false,
-      );
-      ref.read(chatMessagesProvider.notifier).addMessage(errorMessage);
-    } else if (e.toString().contains('401') || e.toString().contains('403')) {
+    // Show verbose error messages (developer mode - no user-friendly fluff)
+    String errorContent;
+    if (e.toString().contains('401') || e.toString().contains('403')) {
       // Authentication errors - clear auth state and redirect to login
       ref.invalidate(authStateManagerProvider);
-    } else if (e.toString().contains('500')) {
-      final errorMessage = ChatMessage(
-        id: const Uuid().v4(),
-        role: 'assistant',
-        content:
-            '⚠️ Unable to connect to the AI model. The server returned an error (500).\n\n'
-            'This is typically a server-side issue. Please try again or contact your administrator.',
-        timestamp: DateTime.now(),
-        isStreaming: false,
-      );
-      ref.read(chatMessagesProvider.notifier).addMessage(errorMessage);
-    } else if (e.toString().contains('404')) {
-      DebugLogger.log(
-        'Model or endpoint not found (404)',
-        scope: 'chat/providers',
-      );
-      final errorMessage = ChatMessage(
-        id: const Uuid().v4(),
-        role: 'assistant',
-        content:
-            '🤖 The selected AI model doesn\'t seem to be available.\n\n'
-            'Please try selecting a different model or check with your administrator.',
-        timestamp: DateTime.now(),
-        isStreaming: false,
-      );
-      ref.read(chatMessagesProvider.notifier).addMessage(errorMessage);
+      errorContent = '🔒 Authentication Error (${e.toString().contains('401') ? '401' : '403'})\n\n$e';
     } else {
-      // For other errors, provide a generic message and rethrow
-      final errorMessage = ChatMessage(
-        id: const Uuid().v4(),
-        role: 'assistant',
-        content:
-            '❌ An unexpected error occurred while processing your request.\n\n'
-            'Please try again or check your connection.',
-        timestamp: DateTime.now(),
-        isStreaming: false,
-      );
-      ref.read(chatMessagesProvider.notifier).addMessage(errorMessage);
+      // All other errors - show full details
+      errorContent = '❌ Error: ${e.runtimeType}\n\n$e\n\n${stackTrace.toString().split('\n').take(5).join('\n')}';
     }
+
+    final errorMessage = ChatMessage(
+      id: const Uuid().v4(),
+      role: 'assistant',
+      content: errorContent,
+      timestamp: DateTime.now(),
+      isStreaming: false,
+    );
+    ref.read(chatMessagesProvider.notifier).addMessage(errorMessage);
   }
 }
 

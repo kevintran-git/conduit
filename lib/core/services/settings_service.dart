@@ -30,6 +30,9 @@ class SettingsService {
   // Realtime transport preference
   static const String _socketTransportModeKey =
       PreferenceKeys.socketTransportMode; // 'polling' or 'ws'
+  // Chat streaming method preference
+  static const String _chatStreamingModeKey =
+      PreferenceKeys.chatStreamingMode; // 'hybrid', 'ws', or 'sse'
   // Quick pill visibility selections (max 2)
   static const String _quickPillsKey = PreferenceKeys
       .quickPills; // StringList of identifiers e.g. ['web','image','tools']
@@ -141,6 +144,8 @@ class SettingsService {
         voiceAutoSendFinal: (box.get(_voiceAutoSendKey) as bool?) ?? false,
         socketTransportMode:
             box.get(_socketTransportModeKey, defaultValue: 'ws') as String,
+        chatStreamingMode:
+            box.get(_chatStreamingModeKey, defaultValue: 'hybrid') as String,
         quickPills: List<String>.from(
           (box.get(_quickPillsKey) as List<dynamic>?) ?? const <String>[],
         ),
@@ -179,6 +184,7 @@ class SettingsService {
       _voiceHoldToTalkKey: settings.voiceHoldToTalk,
       _voiceAutoSendKey: settings.voiceAutoSendFinal,
       _socketTransportModeKey: settings.socketTransportMode,
+      _chatStreamingModeKey: settings.chatStreamingMode,
       _quickPillsKey: settings.quickPills.toList(),
       _sendOnEnterKey: settings.sendOnEnter,
       PreferenceKeys.ttsSpeechRate: settings.ttsSpeechRate,
@@ -314,6 +320,25 @@ class SettingsService {
     return _preferencesBox().put(_socketTransportModeKey, mode);
   }
 
+  /// Chat streaming mode: 'hybrid' (SSE + WebSocket), 'ws' (WebSocket only), or 'sse' (SSE only)
+  static Future<String> getChatStreamingMode() {
+    final raw = _preferencesBox().get(_chatStreamingModeKey) as String?;
+    if (raw == null) {
+      return Future.value('hybrid');
+    }
+    if (raw != 'hybrid' && raw != 'ws' && raw != 'sse') {
+      return Future.value('hybrid');
+    }
+    return Future.value(raw);
+  }
+
+  static Future<void> setChatStreamingMode(String mode) {
+    if (mode != 'hybrid' && mode != 'ws' && mode != 'sse') {
+      mode = 'hybrid';
+    }
+    return _preferencesBox().put(_chatStreamingModeKey, mode);
+  }
+
   // Quick Pills (visibility)
   static Future<List<String>> getQuickPills() {
     final stored = _preferencesBox().get(_quickPillsKey) as List<dynamic>?;
@@ -400,6 +425,7 @@ class AppSettings {
   final bool voiceHoldToTalk;
   final bool voiceAutoSendFinal;
   final String socketTransportMode; // 'polling' or 'ws'
+  final String chatStreamingMode; // 'hybrid', 'ws', or 'sse'
   final List<String> quickPills; // e.g., ['web','image']
   final bool sendOnEnter;
   final SttPreference sttPreference;
@@ -423,6 +449,7 @@ class AppSettings {
     this.voiceHoldToTalk = false,
     this.voiceAutoSendFinal = false,
     this.socketTransportMode = 'ws',
+    this.chatStreamingMode = 'hybrid',
     this.quickPills = const [],
     this.sendOnEnter = false,
     this.sttPreference = SttPreference.auto,
@@ -448,6 +475,7 @@ class AppSettings {
     bool? voiceHoldToTalk,
     bool? voiceAutoSendFinal,
     String? socketTransportMode,
+    String? chatStreamingMode,
     List<String>? quickPills,
     bool? sendOnEnter,
     SttPreference? sttPreference,
@@ -476,6 +504,7 @@ class AppSettings {
       voiceHoldToTalk: voiceHoldToTalk ?? this.voiceHoldToTalk,
       voiceAutoSendFinal: voiceAutoSendFinal ?? this.voiceAutoSendFinal,
       socketTransportMode: socketTransportMode ?? this.socketTransportMode,
+      chatStreamingMode: chatStreamingMode ?? this.chatStreamingMode,
       quickPills: quickPills ?? this.quickPills,
       sendOnEnter: sendOnEnter ?? this.sendOnEnter,
       sttPreference: sttPreference ?? this.sttPreference,
@@ -536,8 +565,7 @@ class AppSettings {
       voiceHoldToTalk,
       voiceAutoSendFinal,
       sttPreference,
-      socketTransportMode,
-      sendOnEnter,
+      Object.hash(socketTransportMode, chatStreamingMode, sendOnEnter),
       ttsVoice,
       ttsSpeechRate,
       ttsPitch,
@@ -644,6 +672,17 @@ class AppSettingsNotifier extends _$AppSettingsNotifier {
       state = state.copyWith(socketTransportMode: sanitized);
     }
     await SettingsService.setSocketTransportMode(sanitized);
+  }
+
+  Future<void> setChatStreamingMode(String mode) async {
+    var sanitized = mode;
+    if (sanitized != 'hybrid' && sanitized != 'ws' && sanitized != 'sse') {
+      sanitized = 'hybrid';
+    }
+    if (state.chatStreamingMode != sanitized) {
+      state = state.copyWith(chatStreamingMode: sanitized);
+    }
+    await SettingsService.setChatStreamingMode(sanitized);
   }
 
   Future<void> setQuickPills(List<String> pills) async {

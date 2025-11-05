@@ -13,6 +13,7 @@ final class PreferenceKeys {
   static const String voiceAutoSendFinal = 'voice_auto_send_final';
   static const String voiceSttPreference = 'voice_stt_preference';
   static const String socketTransportMode = 'socket_transport_mode';
+  static const String chatStreamingMode = 'chat_streaming_mode';
   static const String quickPills = 'quick_pills';
   static const String sendOnEnterKey = 'send_on_enter';
   static const String activeServerId = 'active_server_id';

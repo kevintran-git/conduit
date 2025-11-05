@@ -1336,11 +1336,48 @@ class _ModernChatInputState extends ConsumerState<ModernChatInput>
 
     final enabled = !isGenerating && hasText && widget.enabled;
 
-    // Generating -> STOP variant
+    // Generating -> STOP variant with streaming mode indicator
     if (isGenerating) {
-      return Tooltip(
-        message: AppLocalizations.of(context)!.stopGenerating,
-        child: Material(
+      final chatStreamingMode = ref.watch(appSettingsProvider).chatStreamingMode;
+      final modeLabel = chatStreamingMode == 'hybrid' ? 'SSE+WS' 
+          : chatStreamingMode == 'ws' ? 'WS' 
+          : 'SSE';
+      final modeColor = chatStreamingMode == 'hybrid' ? context.conduitTheme.buttonPrimary
+          : chatStreamingMode == 'ws' ? context.conduitTheme.success
+          : context.conduitTheme.warning;
+      
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Streaming mode badge
+          Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: Spacing.xs,
+              vertical: 2,
+            ),
+            decoration: BoxDecoration(
+              color: modeColor.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(AppBorderRadius.xs),
+              border: Border.all(
+                color: modeColor.withValues(alpha: 0.3),
+                width: BorderWidth.thin,
+              ),
+            ),
+            child: Text(
+              modeLabel,
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+                color: modeColor,
+                height: 1.2,
+              ),
+            ),
+          ),
+          const SizedBox(width: Spacing.xs),
+          // Stop button
+          Tooltip(
+            message: AppLocalizations.of(context)!.stopGenerating,
+            child: Material(
           color: Colors.transparent,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(radius),
@@ -1390,6 +1427,8 @@ class _ModernChatInputState extends ConsumerState<ModernChatInput>
             ),
           ),
         ),
+          ),
+        ],
       );
     }
 
