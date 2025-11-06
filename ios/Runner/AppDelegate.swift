@@ -54,7 +54,7 @@ class BackgroundStreamingHandler: NSObject {
     private var microphoneStreams: Set<String> = []
     private var channel: FlutterMethodChannel?
 
-    static let processingTaskIdentifier = "app.cogwheel.conduit.refresh"
+    static let processingTaskIdentifier = "codes.kvt.conduit.refresh"
 
     override init() {
         super.init()
