@@ -79,10 +79,10 @@
 				<key>CFBundleTypeRole</key>
 				<string>Editor</string>
 				<key>CFBundleURLName</key>
-				<string>app.cogwheel.conduit.share</string>
+				<string>codes.kvt.conduit.share</string>
 				<key>CFBundleURLSchemes</key>
 				<array>
-					<string>ShareMedia-app.cogwheel.conduit</string>
+					<string>ShareMedia-codes.kvt.conduit</string>
 				</array>
 			</dict>
 		</array>
@@ -95,7 +95,7 @@
 		<!-- Background Task Identifiers -->
 		<key>BGTaskSchedulerPermittedIdentifiers</key>
 		<array>
-			<string>app.cogwheel.conduit.refresh</string>
+			<string>codes.kvt.conduit.refresh</string>
 		</array>
 		<!-- Encryption Declaration -->
 		<key>ITSAppUsesNonExemptEncryption</key>
