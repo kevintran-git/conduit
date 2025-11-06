@@ -1,0 +1,214 @@
+import 'dart:async';
+import 'dart:math' show sin;
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../../shared/theme/theme_extensions.dart';
+import '../models/voice_recording_state.dart';
+import '../services/voice_input_service.dart';
+
+/// Visual overlay showing current voice recording state
+class VoiceRecordingOverlay extends ConsumerStatefulWidget {
+  final VoiceRecordingState recordingState;
+  final VoiceInputService voiceService;
+
+  const VoiceRecordingOverlay({
+    super.key,
+    required this.recordingState,
+    required this.voiceService,
+  });
+
+  @override
+  ConsumerState<VoiceRecordingOverlay> createState() =>
+      _VoiceRecordingOverlayState();
+}
+
+class _VoiceRecordingOverlayState
+    extends ConsumerState<VoiceRecordingOverlay>
+    with SingleTickerProviderStateMixin {
+  Timer? _durationTimer;
+  Duration _duration = Duration.zero;
+  late AnimationController _waveController;
+
+  StreamSubscription<int>? _intensitySub;
+  int _currentIntensity = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _duration = widget.recordingState.duration;
+    _startDurationTimer();
+
+    _waveController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1000),
+    )..repeat();
+
+    // Listen to intensity stream for waveform
+    _intensitySub = widget.voiceService.intensityStream.listen((intensity) {
+      if (mounted) {
+        setState(() {
+          _currentIntensity = intensity;
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _durationTimer?.cancel();
+    _waveController.dispose();
+    _intensitySub?.cancel();
+    super.dispose();
+  }
+
+  void _startDurationTimer() {
+    _durationTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
+      if (mounted) {
+        setState(() {
+          _duration = widget.recordingState.duration;
+        });
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = context.conduitTheme;
+    final brightness = Theme.of(context).brightness;
+    final mode = widget.recordingState.mode;
+
+    Color statusColor;
+    String statusText;
+    String helpText;
+    IconData statusIcon;
+
+    switch (mode) {
+      case VoiceRecordingMode.vad:
+        statusColor = Colors.green;
+        statusText = '🎤 VAD Active';
+        helpText = 'Tap to submit • Hold to pause';
+        statusIcon = Icons.mic;
+        break;
+      case VoiceRecordingMode.ptt:
+        statusColor = Colors.red;
+        statusText = '🔴 PTT - Hold';
+        helpText = 'Release to stop';
+        statusIcon = Icons.fiber_manual_record;
+        break;
+      case VoiceRecordingMode.vadPaused:
+        statusColor = Colors.orange;
+        statusText = '⏸️ Paused';
+        helpText = 'Release to resume VAD';
+        statusIcon = Icons.pause;
+        break;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: theme.cardBackground.withValues(
+          alpha: brightness == Brightness.dark ? 0.95 : 0.98,
+        ),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: statusColor.withValues(alpha: 0.5),
+          width: 2,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: statusColor.withValues(alpha: 0.2),
+            blurRadius: 20,
+            spreadRadius: 2,
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Status row
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(statusIcon, color: statusColor, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                statusText,
+                style: TextStyle(
+                  color: theme.textPrimary,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                _formatDuration(_duration),
+                style: TextStyle(
+                  color: theme.textSecondary,
+                  fontSize: 14,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 12),
+
+          // Waveform visualization
+          _buildWaveform(statusColor),
+
+          const SizedBox(height: 12),
+
+          // Help text
+          Text(
+            helpText,
+            style: TextStyle(
+              color: theme.textSecondary,
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWaveform(Color color) {
+    return SizedBox(
+      height: 40,
+      child: AnimatedBuilder(
+        animation: _waveController,
+        builder: (context, child) {
+          return Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: List.generate(15, (index) {
+              final offset = (_waveController.value * 2 * 3.14159) +
+                  (index * 0.4);
+              final baseHeight = 0.3 + (0.7 * _currentIntensity / 10);
+              final height = baseHeight + 0.2 * (1 + sin(offset));
+              return Container(
+                width: 4,
+                height: 40 * height.clamp(0.2, 1.0),
+                margin: const EdgeInsets.symmetric(horizontal: 2),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.8),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              );
+            }),
+          );
+        },
+      ),
+    );
+  }
+
+  String _formatDuration(Duration duration) {
+    final minutes = duration.inMinutes;
+    final seconds = duration.inSeconds % 60;
+    final tenths = (duration.inMilliseconds % 1000) ~/ 100;
+    return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}.${tenths}';
+  }
+}
+

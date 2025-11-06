@@ -23,6 +23,9 @@ import '../../chat/services/voice_input_service.dart';
 import '../../../shared/utils/platform_utils.dart';
 import 'package:conduit/l10n/app_localizations.dart';
 import '../../../shared/widgets/modal_safe_area.dart';
+import '../models/voice_recording_state.dart';
+import 'hybrid_voice_button.dart';
+import 'voice_recording_overlay.dart';
 
 class _SendMessageIntent extends Intent {
   const _SendMessageIntent();
@@ -90,6 +93,7 @@ class _ModernChatInputState extends ConsumerState<ModernChatInput>
   final FocusNode _focusNode = FocusNode();
   bool _pendingFocus = false;
   bool _isRecording = false;
+  VoiceRecordingState? _recordingState;
   // final String _voiceInputText = '';
   bool _hasText = false; // track locally without rebuilding on each keystroke
   StreamSubscription<String>? _voiceStreamSubscription;
@@ -774,6 +778,20 @@ class _ModernChatInputState extends ConsumerState<ModernChatInput>
     );
 
     final List<Widget> composerChildren = <Widget>[
+      // Voice recording overlay
+      if (_recordingState != null)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            Spacing.sm,
+            0,
+            Spacing.sm,
+            Spacing.sm,
+          ),
+          child: VoiceRecordingOverlay(
+            recordingState: _recordingState!,
+            voiceService: _voiceService,
+          ),
+        ),
       if (_showPromptOverlay)
         Padding(
           padding: const EdgeInsets.fromLTRB(
@@ -1259,68 +1277,29 @@ class _ModernChatInputState extends ConsumerState<ModernChatInput>
 
   Widget _buildMicButton(bool voiceAvailable) {
     final bool enabledMic = widget.enabled && voiceAvailable;
-    return Tooltip(
-      message: AppLocalizations.of(context)!.voiceInput,
-      child: Opacity(
-        opacity: enabledMic ? Alpha.primary : Alpha.disabled,
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(AppBorderRadius.circular),
-            onTap: enabledMic
-                ? () {
-                    HapticFeedback.selectionClick();
-                    _toggleVoice();
-                  }
-                : null,
-            child: SizedBox(
-              width: TouchTarget.minimum,
-              height: TouchTarget.minimum,
-              child: Icon(
-                Platform.isIOS ? CupertinoIcons.mic : Icons.mic,
-                size: IconSize.large,
-                color: _isRecording
-                    ? context.conduitTheme.buttonPrimary
-                    : (enabledMic
-                          ? context.conduitTheme.textPrimary.withValues(
-                              alpha: Alpha.strong,
-                            )
-                          : context.conduitTheme.textPrimary.withValues(
-                              alpha: Alpha.disabled,
-                            )),
-              ),
-            ),
-          ),
-        ),
-      ),
+    return HybridVoiceButton(
+      enabled: enabledMic,
+      recordingState: _recordingState,
+      onVoiceStart: _handleVoiceStart,
+      onVoiceEnd: _handleVoiceEnd,
+      onPauseVad: _handlePauseVad,
+      onResumeVad: _handleResumeVad,
+      onSubmit: _handleVoiceSubmit,
+      size: TouchTarget.minimum,
     );
   }
 
   Widget _buildInlineMicIcon(bool voiceAvailable) {
     final bool enabledMic = widget.enabled && voiceAvailable;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(AppBorderRadius.circular),
-        onTap: enabledMic
-            ? () {
-                HapticFeedback.selectionClick();
-                _toggleVoice();
-              }
-            : null,
-        child: Padding(
-          padding: const EdgeInsets.all(Spacing.xs),
-          child: Icon(
-            Platform.isIOS ? CupertinoIcons.mic : Icons.mic,
-            size: IconSize.medium,
-            color: _isRecording
-                ? context.conduitTheme.buttonPrimary
-                : context.conduitTheme.textSecondary.withValues(
-                    alpha: enabledMic ? Alpha.strong : Alpha.disabled,
-                  ),
-          ),
-        ),
-      ),
+    return HybridVoiceButton(
+      enabled: enabledMic,
+      recordingState: _recordingState,
+      onVoiceStart: _handleVoiceStart,
+      onVoiceEnd: _handleVoiceEnd,
+      onPauseVad: _handlePauseVad,
+      onResumeVad: _handleResumeVad,
+      onSubmit: _handleVoiceSubmit,
+      size: 32.0, // Slightly smaller for inline
     );
   }
 
@@ -2386,17 +2365,11 @@ class _ModernChatInputState extends ConsumerState<ModernChatInput>
     );
   }
 
-  // --- Inline Voice Input ---
-  Future<void> _toggleVoice() async {
-    if (_isRecording) {
-      await _stopVoice();
-    } else {
-      await _startVoice();
-    }
-  }
+  // ========== Hybrid Voice Input ==========
 
-  Future<void> _startVoice() async {
+  Future<void> _handleVoiceStart(VoiceRecordingMode mode) async {
     if (!widget.enabled) return;
+
     try {
       final ok = await _voiceService.initialize();
       if (!mounted) return;
@@ -2407,18 +2380,24 @@ class _ModernChatInputState extends ConsumerState<ModernChatInput>
         );
         return;
       }
-      // Centralized permission + start
+
       final stream = await _voiceService.beginListening();
       if (!mounted) return;
+
       setState(() {
         _isRecording = true;
+        _recordingState = VoiceRecordingState(
+          mode: mode,
+          startTime: DateTime.now(),
+        );
         _baseTextAtStart = _controller.text;
       });
+
       _intensitySub?.cancel();
-      // intensity stream no longer used for UI; stop listening
       _textSub?.cancel();
       _textSub = stream.listen(
         (text) async {
+          if (!mounted) return;
           final updated = _baseTextAtStart.isEmpty
               ? text
               : '${_baseTextAtStart.trimRight()} $text';
@@ -2429,17 +2408,29 @@ class _ModernChatInputState extends ConsumerState<ModernChatInput>
         },
         onDone: () {
           if (!mounted) return;
-          setState(() => _isRecording = false);
+          setState(() {
+            _isRecording = false;
+            _recordingState = null;
+          });
           _intensitySub?.cancel();
           _intensitySub = null;
+          // Light double-tick for auto-submit
+          PlatformUtils.lightHaptic();
+          Future.delayed(const Duration(milliseconds: 100), () {
+            if (mounted) PlatformUtils.lightHaptic();
+          });
         },
         onError: (_) {
           if (!mounted) return;
-          setState(() => _isRecording = false);
+          setState(() {
+            _isRecording = false;
+            _recordingState = null;
+          });
           _intensitySub?.cancel();
           _intensitySub = null;
         },
       );
+
       _ensureFocusedIfEnabled();
     } catch (_) {
       _showVoiceUnavailable(
@@ -2447,20 +2438,48 @@ class _ModernChatInputState extends ConsumerState<ModernChatInput>
             'Failed to start voice input',
       );
       if (!mounted) return;
-      setState(() => _isRecording = false);
+      setState(() {
+        _isRecording = false;
+        _recordingState = null;
+      });
     }
   }
 
-  Future<void> _stopVoice() async {
+  Future<void> _handleVoiceEnd() async {
     _intensitySub?.cancel();
     _intensitySub = null;
     await _voiceService.stopListening();
     if (!mounted) return;
-    setState(() => _isRecording = false);
-    HapticFeedback.selectionClick();
+    setState(() {
+      _isRecording = false;
+      _recordingState = null;
+    });
   }
 
-  // When on-device STT is unavailable we rely on server transcription.
+  void _handlePauseVad() {
+    _voiceService.pauseVad();
+    if (!mounted) return;
+    setState(() {
+      _recordingState = _recordingState?.copyWith(
+        mode: VoiceRecordingMode.vadPaused,
+      );
+    });
+  }
+
+  void _handleResumeVad() {
+    _voiceService.resumeVad();
+    if (!mounted) return;
+    setState(() {
+      _recordingState = _recordingState?.copyWith(
+        mode: VoiceRecordingMode.vad,
+      );
+    });
+  }
+
+  Future<void> _handleVoiceSubmit() async {
+    await _voiceService.submitRecording();
+    // The stream's onDone will handle state cleanup
+  }
 
   void _showVoiceUnavailable(String message) {
     if (!mounted) return;
