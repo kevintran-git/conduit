@@ -6,8 +6,11 @@ enum VoiceRecordingMode {
   /// Push-to-Talk mode - must hold button to record
   ptt,
 
-  /// VAD temporarily paused while user holds button
+  /// VAD temporarily paused while user holds button (still recording, just won't auto-stop)
   vadPaused,
+
+  /// Recording stopped, transcribing/sending to server
+  processing,
 }
 
 /// Complete state of an active voice recording session
@@ -27,6 +30,7 @@ class VoiceRecordingState {
   bool get isVadMode => mode == VoiceRecordingMode.vad;
   bool get isPttMode => mode == VoiceRecordingMode.ptt;
   bool get isVadPaused => mode == VoiceRecordingMode.vadPaused;
+  bool get isProcessing => mode == VoiceRecordingMode.processing;
 
   VoiceRecordingState copyWith({
     VoiceRecordingMode? mode,
