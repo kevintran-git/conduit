@@ -25,7 +25,7 @@ import 'package:conduit/l10n/app_localizations.dart';
 import '../../../shared/widgets/modal_safe_area.dart';
 import '../models/voice_recording_state.dart';
 import 'voice_recording_overlay.dart';
-import '../controllers/voice_input_gesture_controller.dart';
+import '../controllers/voice_recording_controller.dart';
 
 class _SendMessageIntent extends Intent {
   const _SendMessageIntent();
@@ -109,14 +109,15 @@ class _ModernChatInputState extends ConsumerState<ModernChatInput>
   TextRange? _currentPromptRange;
   int _promptSelectionIndex = 0;
 
-  // Voice input controller
-  VoiceInputGestureController? _gestureController;
+  // Voice recording controller
+  VoiceRecordingController? _voiceRecordingController;
+  OverlayEntry? _recordingOverlayEntry;
 
   @override
   void initState() {
     super.initState();
     _voiceService = ref.read(voiceInputServiceProvider);
-    _initializeGestureController();
+    _initializeVoiceRecordingController();
 
     // Apply any prefilled text on first frame (focus handled via inputFocusTrigger)
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -162,14 +163,52 @@ class _ModernChatInputState extends ConsumerState<ModernChatInput>
     _intensitySub?.cancel();
     _textSub?.cancel();
     _voiceService.stopListening();
-    _gestureController?.dispose();
+    _voiceRecordingController?.dispose();
+    _removeRecordingOverlay();
     super.dispose();
   }
 
-  void _initializeGestureController() {
-    _gestureController = VoiceInputGestureController(
+  void _removeRecordingOverlay() {
+    _recordingOverlayEntry?.remove();
+    _recordingOverlayEntry = null;
+  }
+
+  void _showRecordingOverlay() {
+    if (_recordingState == null || !mounted) return;
+    _removeRecordingOverlay();
+
+    _recordingOverlayEntry = OverlayEntry(
+      builder: (context) => Positioned.fill(
+        child: IgnorePointer(
+          ignoring: _recordingState?.mode == VoiceRecordingMode.processing,
+          child: GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onTap: _handleRecordingOverlayTap,
+            onLongPressStart: (_) => _handleRecordingOverlayHoldStart(),
+            onLongPressEnd: (_) => _handleRecordingOverlayHoldEnd(),
+            child: Container(color: Colors.transparent),
+          ),
+        ),
+      ),
+    );
+
+    Overlay.of(context).insert(_recordingOverlayEntry!);
+  }
+
+  void _updateRecordingOverlay() {
+    if (_recordingOverlayEntry != null && mounted) {
+      _recordingOverlayEntry!.markNeedsBuild();
+    }
+  }
+
+  void _initializeVoiceRecordingController() {
+    _voiceRecordingController = VoiceRecordingController(
       voiceService: _voiceService,
       onVoiceStart: _handleVoiceStart,
+      onVoiceEnd: _handleVoiceEnd,
+      onVoiceSubmit: _handleVoiceSubmit,
+      onPauseVad: _handlePauseVad,
+      onResumeVad: _handleResumeVad,
     );
   }
 
@@ -791,7 +830,7 @@ class _ModernChatInputState extends ConsumerState<ModernChatInput>
     );
 
     final List<Widget> composerChildren = <Widget>[
-      // Voice recording overlay
+      // Voice recording overlay - shown in composer, gestures handled via OverlayEntry
       if (_recordingState != null)
         Padding(
           padding: const EdgeInsets.fromLTRB(
@@ -875,7 +914,7 @@ class _ModernChatInputState extends ConsumerState<ModernChatInput>
                           ),
                         ),
                         if (!_hasText && voiceAvailable && !isGenerating)
-                          _buildInlineMicIcon(voiceAvailable),
+                          _buildMicButton(voiceAvailable: voiceAvailable, inline: true),
                       ],
                     ),
                   ),
@@ -963,7 +1002,7 @@ class _ModernChatInputState extends ConsumerState<ModernChatInput>
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   if (!_hasText && voiceAvailable && !isGenerating) ...[
-                    _buildMicButton(voiceAvailable),
+                    _buildMicButton(voiceAvailable: voiceAvailable),
                     const SizedBox(width: Spacing.sm),
                   ],
                   _buildPrimaryButton(
@@ -1291,57 +1330,52 @@ class _ModernChatInputState extends ConsumerState<ModernChatInput>
     );
   }
 
-  Widget _buildMicButton(bool voiceAvailable) {
+  /// Builds a mic button widget with unified gesture handling
+  Widget _buildMicButton({
+    required bool voiceAvailable,
+    bool inline = false,
+  }) {
     final bool enabledMic = widget.enabled && voiceAvailable;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(AppBorderRadius.circular),
-        onTapDown: enabledMic ? (_) => _gestureController?.handlePointerDown() : null,
-        onTapUp: enabledMic ? (_) => _gestureController?.handlePointerUp() : null,
-        onTapCancel: enabledMic ? () => _gestureController?.handlePointerCancel() : null,
-        child: SizedBox(
-          width: TouchTarget.minimum,
-          height: TouchTarget.minimum,
-          child: Icon(
-            Platform.isIOS ? CupertinoIcons.mic : Icons.mic,
-            size: IconSize.large,
-            color: _isRecording
-                ? context.conduitTheme.buttonPrimary
-                : (enabledMic
-                      ? context.conduitTheme.textPrimary.withValues(
-                          alpha: Alpha.strong,
-                        )
-                      : context.conduitTheme.textPrimary.withValues(
-                          alpha: Alpha.disabled,
-                        )),
-          ),
-        ),
-      ),
-    );
-  }
+    final iconSize = inline ? IconSize.medium : IconSize.large;
+    final iconColor = _isRecording
+        ? context.conduitTheme.buttonPrimary
+        : (inline
+            ? context.conduitTheme.textSecondary.withValues(
+                alpha: enabledMic ? Alpha.strong : Alpha.disabled,
+              )
+            : (enabledMic
+                ? context.conduitTheme.textPrimary.withValues(
+                    alpha: Alpha.strong,
+                  )
+                : context.conduitTheme.textPrimary.withValues(
+                    alpha: Alpha.disabled,
+                  )));
 
-  Widget _buildInlineMicIcon(bool voiceAvailable) {
-    final bool enabledMic = widget.enabled && voiceAvailable;
     return Material(
       color: Colors.transparent,
       child: InkWell(
         borderRadius: BorderRadius.circular(AppBorderRadius.circular),
-        onTapDown: enabledMic ? (_) => _gestureController?.handlePointerDown() : null,
-        onTapUp: enabledMic ? (_) => _gestureController?.handlePointerUp() : null,
-        onTapCancel: enabledMic ? () => _gestureController?.handlePointerCancel() : null,
-        child: Padding(
-          padding: const EdgeInsets.all(Spacing.xs),
-          child: Icon(
-            Platform.isIOS ? CupertinoIcons.mic : Icons.mic,
-            size: IconSize.medium,
-            color: _isRecording
-                ? context.conduitTheme.buttonPrimary
-                : context.conduitTheme.textSecondary.withValues(
-                    alpha: enabledMic ? Alpha.strong : Alpha.disabled,
-                  ),
-          ),
-        ),
+        onTapDown: enabledMic ? (_) => _voiceRecordingController?.handlePointerDown() : null,
+        onTapUp: enabledMic ? (_) => _voiceRecordingController?.handlePointerUp() : null,
+        onTapCancel: enabledMic ? () => _voiceRecordingController?.handlePointerCancel() : null,
+        child: inline
+            ? Padding(
+                padding: const EdgeInsets.all(Spacing.xs),
+                child: Icon(
+                  Platform.isIOS ? CupertinoIcons.mic : Icons.mic,
+                  size: iconSize,
+                  color: iconColor,
+                ),
+              )
+            : SizedBox(
+                width: TouchTarget.minimum,
+                height: TouchTarget.minimum,
+                child: Icon(
+                  Platform.isIOS ? CupertinoIcons.mic : Icons.mic,
+                  size: iconSize,
+                  color: iconColor,
+                ),
+              ),
       ),
     );
   }
@@ -2438,17 +2472,23 @@ class _ModernChatInputState extends ConsumerState<ModernChatInput>
         _recordingState = newState;
         _baseTextAtStart = _controller.text;
       });
+      
+      // Show full-screen gesture overlay
+      _showRecordingOverlay();
+      
+      // Reset long press flag if recording ended externally
+      if (mode != VoiceRecordingMode.vadPaused) {
+        _voiceRecordingController?.resetLongPressState();
+      }
 
-      // Haptic feedback: recording started (different for VAD vs PTT)
-      // PTT already has heavy haptic from button press, VAD has light haptic
-      // Add a subtle confirmation haptic here for both
+      // Haptic feedback: recording started
       if (mode == VoiceRecordingMode.vad) {
         // Additional subtle confirmation for VAD start
         Future.delayed(const Duration(milliseconds: 50), () {
           if (mounted) PlatformUtils.lightHaptic();
         });
       }
-      // PTT already has heavyImpact from button press, no need to duplicate
+      // Long press already has heavyImpact from button press
 
       _intensitySub?.cancel();
       _textSub?.cancel();
@@ -2477,6 +2517,7 @@ class _ModernChatInputState extends ConsumerState<ModernChatInput>
             setState(() {
               _recordingState = null;
             });
+            _removeRecordingOverlay();
           }
         },
         onDone: () {
@@ -2518,6 +2559,7 @@ class _ModernChatInputState extends ConsumerState<ModernChatInput>
             _isRecording = false;
             _recordingState = null;
           });
+          _removeRecordingOverlay();
           _intensitySub?.cancel();
           _intensitySub = null;
         },
@@ -2537,12 +2579,16 @@ class _ModernChatInputState extends ConsumerState<ModernChatInput>
         _isRecording = false;
         _recordingState = null;
       });
+      _removeRecordingOverlay();
     }
   }
 
   Future<void> _handleVoiceEnd() async {
     _intensitySub?.cancel();
     _intensitySub = null;
+    
+    // Reset long press flag
+    _voiceRecordingController?.resetLongPressState();
     
     // Haptic feedback: recording stopped
     HapticFeedback.mediumImpact();
@@ -2558,12 +2604,13 @@ class _ModernChatInputState extends ConsumerState<ModernChatInput>
     }
     
     await _voiceService.stopListening();
+    _removeRecordingOverlay();
     // Processing overlay will be cleared when text arrives
   }
 
   void _handlePauseVad() {
     // Only pause if server STT is available
-    if (_gestureController?.canPauseVad != true) return;
+    if (_voiceRecordingController?.canPauseVad != true) return;
     
     // Haptic feedback: VAD paused (double-pulse pattern)
     HapticFeedback.mediumImpact();
@@ -2579,6 +2626,7 @@ class _ModernChatInputState extends ConsumerState<ModernChatInput>
         mode: VoiceRecordingMode.vadPaused,
       );
     });
+    _updateRecordingOverlay();
   }
 
   void _handleResumeVad() {
@@ -2594,6 +2642,7 @@ class _ModernChatInputState extends ConsumerState<ModernChatInput>
         mode: VoiceRecordingMode.vad,
       );
     });
+    _updateRecordingOverlay();
   }
 
   Future<void> _handleVoiceSubmit() async {
@@ -2624,19 +2673,8 @@ class _ModernChatInputState extends ConsumerState<ModernChatInput>
     // Ignore taps during processing
     if (mode == VoiceRecordingMode.processing) return;
     
-    if (mode == VoiceRecordingMode.ptt) {
-      // Tap during PTT → stop recording
-      // Haptic handled in _handleVoiceEnd
-      _handleVoiceEnd();
-    } else if (mode == VoiceRecordingMode.vad) {
-      // Tap during VAD → submit immediately
-      // Haptic handled in _handleVoiceSubmit
-      _handleVoiceSubmit();
-    } else if (mode == VoiceRecordingMode.vadPaused) {
-      // Tap while paused → resume
-      // Haptic handled in _handleResumeVad
-      _handleResumeVad();
-    }
+    // Tap anywhere → submit
+    _handleVoiceSubmit();
   }
 
   void _handleRecordingOverlayHoldStart() {
@@ -2647,10 +2685,11 @@ class _ModernChatInputState extends ConsumerState<ModernChatInput>
     // Ignore holds during processing
     if (mode == VoiceRecordingMode.processing) return;
     
-    if (mode == VoiceRecordingMode.vad && _gestureController?.canPauseVad == true) {
-      // Hold during VAD → pause
+    // Hold during VAD → pause (if not already paused)
+    if (mode == VoiceRecordingMode.vad && _voiceRecordingController?.canPauseVad == true) {
       _handlePauseVad();
     }
+    // If already paused, hold does nothing (stays paused)
   }
 
   void _handleRecordingOverlayHoldEnd() {
@@ -2661,13 +2700,8 @@ class _ModernChatInputState extends ConsumerState<ModernChatInput>
     // Ignore releases during processing
     if (mode == VoiceRecordingMode.processing) return;
     
-    if (mode == VoiceRecordingMode.ptt) {
-      // Release during PTT → stop recording
-      // Haptic handled in _handleVoiceEnd
-      _handleVoiceEnd();
-    } else if (mode == VoiceRecordingMode.vadPaused) {
-      // Release while paused → resume
-      // Haptic handled in _handleResumeVad
+    // Release while paused → resume VAD
+    if (mode == VoiceRecordingMode.vadPaused) {
       _handleResumeVad();
     }
   }

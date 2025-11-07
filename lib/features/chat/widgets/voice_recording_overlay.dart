@@ -99,16 +99,10 @@ class _VoiceRecordingOverlayState
         helpText = usingServerStt ? 'Tap to submit • Hold to pause' : 'Tap to submit';
         statusIcon = Icons.mic;
         break;
-      case VoiceRecordingMode.ptt:
-        statusColor = Colors.red;
-        statusText = '🔴 PTT - Hold';
-        helpText = 'Release to stop';
-        statusIcon = Icons.fiber_manual_record;
-        break;
       case VoiceRecordingMode.vadPaused:
         statusColor = Colors.orange;
-        statusText = '⏸️ Hold Released';
-        helpText = 'Still recording • Release to auto-stop';
+        statusText = '⏸️ Paused';
+        helpText = 'Tap to submit • Release to resume';
         statusIcon = Icons.pause;
         break;
       case VoiceRecordingMode.processing:
@@ -117,38 +111,36 @@ class _VoiceRecordingOverlayState
         helpText = 'Transcribing audio...';
         statusIcon = Icons.sync;
         break;
+      case VoiceRecordingMode.ptt:
+        // PTT mode no longer used - fall through to VAD paused
+        statusColor = Colors.orange;
+        statusText = '⏸️ Paused';
+        helpText = 'Tap to submit • Release to resume';
+        statusIcon = Icons.pause;
+        break;
     }
 
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      // Disable gestures during processing
-      onTap: mode != VoiceRecordingMode.processing ? widget.onTap : null,
-      onLongPressStart: mode != VoiceRecordingMode.processing && widget.onLongPressStart != null 
-          ? (_) => widget.onLongPressStart!()
-          : null,
-      onLongPressEnd: mode != VoiceRecordingMode.processing && widget.onLongPressEnd != null
-          ? (_) => widget.onLongPressEnd!()
-          : null,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        decoration: BoxDecoration(
-          color: theme.cardBackground.withValues(
-            alpha: brightness == Brightness.dark ? 0.95 : 0.98,
-          ),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: statusColor.withValues(alpha: 0.5),
-            width: 2,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: statusColor.withValues(alpha: 0.2),
-              blurRadius: 20,
-              spreadRadius: 2,
-            ),
-          ],
+    // Simple card widget - gestures handled by OverlayEntry in parent
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: theme.cardBackground.withValues(
+          alpha: brightness == Brightness.dark ? 0.95 : 0.98,
         ),
-        child: Column(
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: statusColor.withValues(alpha: 0.5),
+          width: 2,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: statusColor.withValues(alpha: 0.2),
+            blurRadius: 20,
+            spreadRadius: 2,
+          ),
+        ],
+      ),
+      child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           // Status row
@@ -207,7 +199,6 @@ class _VoiceRecordingOverlayState
             textAlign: TextAlign.center,
           ),
         ],
-        ),
       ),
     );
   }
