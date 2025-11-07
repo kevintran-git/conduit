@@ -2496,8 +2496,6 @@ class _ModernChatInputState extends ConsumerState<ModernChatInput>
         (text) async {
           if (!mounted) return;
           
-          final wasProcessing = _recordingState?.isProcessing ?? false;
-          
           final updated = _baseTextAtStart.isEmpty
               ? text
               : '${_baseTextAtStart.trimRight()} $text';
@@ -2506,9 +2504,9 @@ class _ModernChatInputState extends ConsumerState<ModernChatInput>
             selection: TextSelection.collapsed(offset: updated.length),
           );
           
-          // Clear the processing overlay when text arrives
-          if (wasProcessing) {
-            // Haptic feedback: transcription complete (success pattern)
+          // FIXED: Always clear when final text arrives - we're done
+          if (_recordingState != null) {
+            // Haptic feedback: transcription complete
             HapticFeedback.lightImpact();
             Future.delayed(const Duration(milliseconds: 80), () {
               if (mounted) PlatformUtils.lightHaptic();
@@ -2516,6 +2514,7 @@ class _ModernChatInputState extends ConsumerState<ModernChatInput>
             
             setState(() {
               _recordingState = null;
+              _isRecording = false;
             });
             _removeRecordingOverlay();
           }
