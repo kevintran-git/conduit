@@ -56,6 +56,7 @@ class VoiceInputService {
 
   bool get isSupportedPlatform => Platform.isAndroid || Platform.isIOS;
   bool get hasServerStt => _api != null;
+  bool get usingServerStt => _usingServerStt;
   SttPreference get preference => _preference;
   bool get allowsServerFallback => _preference != SttPreference.deviceOnly;
   bool get prefersServerOnly => _preference == SttPreference.serverOnly;
