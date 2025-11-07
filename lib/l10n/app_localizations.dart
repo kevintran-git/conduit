@@ -2265,6 +2265,36 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Lower overhead, but may fail behind strict proxies/firewalls.'**
   String get transportModeWsInfo;
+
+  /// No description provided for @voiceCallTranscribing.
+  ///
+  /// In en, this message translates to:
+  /// **'Transcribing...'**
+  String get voiceCallTranscribing;
+
+  /// No description provided for @voiceCallSend.
+  ///
+  /// In en, this message translates to:
+  /// **'Send'**
+  String get voiceCallSend;
+
+  /// No description provided for @voiceCallMute.
+  ///
+  /// In en, this message translates to:
+  /// **'Mute'**
+  String get voiceCallMute;
+
+  /// No description provided for @voiceCallVadPaused.
+  ///
+  /// In en, this message translates to:
+  /// **'Tap to Resume'**
+  String get voiceCallVadPaused;
+
+  /// No description provided for @voiceCallListeningHold.
+  ///
+  /// In en, this message translates to:
+  /// **'Listening (Hold)'**
+  String get voiceCallListeningHold;
 }
 
 class _AppLocalizationsDelegate

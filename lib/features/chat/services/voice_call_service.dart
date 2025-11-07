@@ -1,8 +1,7 @@
 import 'dart:async';
-
+import 'dart:ui';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
-
 import '../../../core/providers/app_providers.dart';
 import '../../../core/services/background_streaming_handler.dart';
 import '../../../core/services/socket_service.dart';
@@ -38,18 +37,44 @@ class VoiceCallService {
   final VoiceCallNotificationService _notificationService =
       VoiceCallNotificationService();
 
+  // State
   VoiceCallState _state = VoiceCallState.idle;
   String? _sessionId;
+  bool _isDisposed = false;
+  
+  // Pause management
+  final Set<VoiceCallPauseReason> _pauseReasons = <VoiceCallPauseReason>{};
+  
+  // Subscriptions
   StreamSubscription<String>? _transcriptSubscription;
   StreamSubscription<int>? _intensitySubscription;
-  String _accumulatedTranscript = '';
-  bool _isDisposed = false;
-  bool _isMuted = false;
-  bool _listeningPaused = false;
-  final Set<VoiceCallPauseReason> _pauseReasons = <VoiceCallPauseReason>{};
   SocketEventSubscription? _socketSubscription;
   Timer? _keepAliveTimer;
 
+  // User input
+  String _currentTranscript = '';
+  
+  // Response streaming
+  int _messageGeneration = 0;
+  String _streamingResponse = '';
+  bool _responseComplete = false;
+  final List<String> _sentencesToSpeak = [];
+  int _sentencesProcessed = 0;
+  
+  // TTS state
+  bool _isSpeaking = false;
+  
+  // Background streaming (muted state - LLM streams while user prepares response)
+  bool _isBackgroundStreaming = false;
+  bool _manualSendPending = false;
+  
+  // VAD pause
+  bool _vadPaused = false;
+  
+  // Haptic callback
+  VoidCallback? _onResponseChunk;
+
+  // Broadcast streams
   final StreamController<VoiceCallState> _stateController =
       StreamController<VoiceCallState>.broadcast();
   final StreamController<String> _transcriptController =
@@ -58,57 +83,60 @@ class VoiceCallService {
       StreamController<String>.broadcast();
   final StreamController<int> _intensityController =
       StreamController<int>.broadcast();
+  final StreamController<bool> _vadPausedController =
+      StreamController<bool>.broadcast();
 
   VoiceCallService({
     required VoiceInputService voiceInput,
     required TextToSpeechService tts,
     required SocketService socketService,
     required Ref ref,
-  }) : _voiceInput = voiceInput,
-       _tts = tts,
-       _socketService = socketService,
-       _ref = ref {
+  })  : _voiceInput = voiceInput,
+        _tts = tts,
+        _socketService = socketService,
+        _ref = ref {
     _tts.bindHandlers(
-      onStart: _handleTtsStart,
-      onComplete: _handleTtsComplete,
-      onError: _handleTtsError,
-      // sentence/word callbacks are not required for call UI, but harmless
+      onStart: _onTtsStart,
+      onComplete: _onTtsComplete,
+      onError: _onTtsError,
     );
-
-    // Set up notification action handler
     _notificationService.onActionPressed = _handleNotificationAction;
   }
 
+  // Getters
   VoiceCallState get state => _state;
   Stream<VoiceCallState> get stateStream => _stateController.stream;
   Stream<String> get transcriptStream => _transcriptController.stream;
   Stream<String> get responseStream => _responseController.stream;
   Stream<int> get intensityStream => _intensityController.stream;
+  bool get isVadPaused => _vadPaused;
+  Stream<bool> get vadPausedStream => _vadPausedController.stream;
+
+  void setResponseChunkCallback(VoidCallback? callback) {
+    _onResponseChunk = callback;
+  }
+
+  // ============================================================================
+  // Initialization
+  // ============================================================================
 
   Future<void> initialize() async {
     if (_isDisposed) return;
-
+    
     _pauseReasons.clear();
-    _listeningPaused = false;
 
-    // Initialize notification service
     await _notificationService.initialize();
-
-    // Request notification permissions if needed
-    final notificationsEnabled = await _notificationService
-        .areNotificationsEnabled();
+    final notificationsEnabled = await _notificationService.areNotificationsEnabled();
     if (!notificationsEnabled) {
       await _notificationService.requestPermissions();
     }
 
-    // Initialize voice input
     final voiceInitialized = await _voiceInput.initialize();
     if (!voiceInitialized) {
       _updateState(VoiceCallState.error);
       throw Exception('Voice input initialization failed');
     }
 
-    // Check if preferred STT path is available
     final hasLocalStt = _voiceInput.hasLocalStt;
     final hasServerStt = _voiceInput.hasServerStt;
     final ready = switch (_voiceInput.preference) {
@@ -122,14 +150,12 @@ class VoiceCallService {
       throw Exception('Preferred speech recognition engine is unavailable');
     }
 
-    // Check microphone permissions
     final hasMicPermission = await _voiceInput.checkPermissions();
     if (!hasMicPermission) {
       _updateState(VoiceCallState.error);
       throw Exception('Microphone permission not granted');
     }
 
-    // Initialize TTS with current app settings (engine/voice/rate/pitch/volume)
     final settings = _ref.read(appSettingsProvider);
     await _tts.initialize(
       deviceVoice: settings.ttsVoice,
@@ -141,36 +167,34 @@ class VoiceCallService {
     );
   }
 
+  // ============================================================================
+  // Call lifecycle
+  // ============================================================================
+
   Future<void> startCall(String? conversationId) async {
     if (_isDisposed) return;
 
     try {
-      // Update state (this will trigger notification)
       _updateState(VoiceCallState.connecting);
-
-      // Enable wake lock to keep screen on and prevent audio interruption
       await WakelockPlus.enable();
 
-      // Ensure socket connection
       await _socketService.ensureConnected();
       _sessionId = _socketService.sessionId;
-
       if (_sessionId == null) {
         throw Exception('Failed to establish socket connection');
       }
 
-      await BackgroundStreamingHandler.instance.startBackgroundExecution(const [
-        _voiceCallStreamId,
-      ], requiresMicrophone: true);
+      await BackgroundStreamingHandler.instance.startBackgroundExecution(
+        const [_voiceCallStreamId],
+        requiresMicrophone: true,
+      );
 
-      // Set up periodic keep-alive to refresh wake lock (every 5 minutes)
       _keepAliveTimer?.cancel();
       _keepAliveTimer = Timer.periodic(
         const Duration(minutes: 5),
         (_) => BackgroundStreamingHandler.instance.keepAlive(),
       );
 
-      // Set up socket event listener for assistant responses
       _socketSubscription = _socketService.addChatEventHandler(
         conversationId: conversationId,
         sessionId: _sessionId,
@@ -178,79 +202,105 @@ class VoiceCallService {
         handler: _handleSocketEvent,
       );
 
-      // Start listening for user voice input
-      await _startListening();
+      await _beginListening();
     } catch (e) {
+      await _cleanupCall();
       _updateState(VoiceCallState.error);
-      _keepAliveTimer?.cancel();
-      _keepAliveTimer = null;
-      await WakelockPlus.disable();
-      await _notificationService.cancelNotification();
-      await BackgroundStreamingHandler.instance.stopBackgroundExecution(const [
-        _voiceCallStreamId,
-      ]);
       rethrow;
     }
   }
 
-  Future<void> _startListening() async {
+  Future<void> stopCall() async {
     if (_isDisposed) return;
+    await _cleanupCall();
+    _updateState(VoiceCallState.disconnected);
+  }
+
+  Future<void> _cleanupCall() async {
+    _keepAliveTimer?.cancel();
+    _keepAliveTimer = null;
+
+    await _stopListening();
+    _socketSubscription?.dispose();
+    _socketSubscription = null;
+
+    await _tts.stop();
+    
+    await BackgroundStreamingHandler.instance.stopBackgroundExecution(
+      const [_voiceCallStreamId],
+    );
+    await _notificationService.cancelNotification();
+    await WakelockPlus.disable();
+
+    _sessionId = null;
+    _currentTranscript = '';
+    _streamingResponse = '';
+    _responseComplete = false;
+    _sentencesToSpeak.clear();
+    _sentencesProcessed = 0;
+    _isSpeaking = false;
+    _isBackgroundStreaming = false;
+    _manualSendPending = false;
+    _pauseReasons.clear();
+  }
+
+  // ============================================================================
+  // Listening phase
+  // ============================================================================
+
+  Future<void> _beginListening() async {
+    if (_isDisposed) return;
+    
+    // Check if paused
+    if (_pauseReasons.isNotEmpty) {
+      _updateState(VoiceCallState.paused);
+      return;
+    }
+
+    // Verify STT is available
+    final hasLocalStt = _voiceInput.hasLocalStt;
+    final hasServerStt = _voiceInput.hasServerStt;
+    final pref = _voiceInput.preference;
+    final engineAvailable = switch (pref) {
+      SttPreference.deviceOnly => hasLocalStt,
+      SttPreference.serverOnly => hasServerStt,
+      SttPreference.auto => hasLocalStt || hasServerStt,
+    };
+
+    if (!engineAvailable) {
+      _updateState(VoiceCallState.error);
+      throw Exception('Speech recognition engine is unavailable');
+    }
+
+    // Only clear transcript if NOT in background streaming mode
+    if (!_isBackgroundStreaming) {
+      _currentTranscript = '';
+    }
+    
+    _updateState(VoiceCallState.listening);
 
     try {
-      if (_pauseReasons.isNotEmpty) {
-        _listeningPaused = true;
-        if (_state != VoiceCallState.paused) {
-          _updateState(VoiceCallState.paused);
-        }
-        return;
-      }
-
-      _listeningPaused = false;
-      _accumulatedTranscript = '';
-
-      final hasLocalStt = _voiceInput.hasLocalStt;
-      final hasServerStt = _voiceInput.hasServerStt;
-      final pref = _voiceInput.preference;
-      final engineAvailable = switch (pref) {
-        SttPreference.deviceOnly => hasLocalStt,
-        SttPreference.serverOnly => hasServerStt,
-        SttPreference.auto => hasLocalStt || hasServerStt,
-      };
-
-      if (!engineAvailable) {
-        _updateState(VoiceCallState.error);
-        throw Exception('Preferred speech recognition engine is unavailable');
-      }
-
-      _updateState(VoiceCallState.listening);
-
       final stream = await _voiceInput.beginListening();
-
+      
       _transcriptSubscription = stream.listen(
         (text) {
-          if (_isDisposed) return;
-          _accumulatedTranscript = text;
+          if (_isDisposed || _state != VoiceCallState.listening) return;
+          _currentTranscript = text;
           _transcriptController.add(text);
         },
         onError: (error) {
           if (_isDisposed) return;
           _updateState(VoiceCallState.error);
         },
-        onDone: () async {
-          if (_isDisposed) return;
-          // User stopped speaking, send message to assistant
-          if (_accumulatedTranscript.trim().isNotEmpty) {
-            await _sendMessageToAssistant(_accumulatedTranscript);
-          } else {
-            // No input, restart listening
-            await _startListening();
-          }
+        onDone: () {
+          // Only process if still in listening state
+          if (_isDisposed || _state != VoiceCallState.listening) return;
+          _onVoiceInputComplete();
         },
       );
 
-      // Forward intensity stream for waveform visualization
       _intensitySubscription = _voiceInput.intensityStream.listen((intensity) {
-        if (_isDisposed) return;
+        if (_isDisposed || _state != VoiceCallState.listening) return;
         _intensityController.add(intensity);
       });
     } catch (e) {
@@ -259,23 +309,99 @@ class VoiceCallService {
     }
   }
 
-  Future<void> _sendMessageToAssistant(String text) async {
-    if (_isDisposed) return;
+  Future<void> _stopListening() async {
+    await _transcriptSubscription?.cancel();
+    _transcriptSubscription = null;
+    await _intensitySubscription?.cancel();
+    _intensitySubscription = null;
+    await _voiceInput.stopListening();
+  }
 
-    try {
-      _updateState(VoiceCallState.processing);
-      _accumulatedResponse = ''; // Reset response accumulator
-
-      // Send message using the existing chat infrastructure
-      sendMessageFromService(_ref, text, null);
-    } catch (e) {
-      _updateState(VoiceCallState.error);
-      rethrow;
+  void _onVoiceInputComplete() {
+    // User stopped speaking (VAD detected end) OR manual send triggered completion
+    
+    // Check if this was a manual send
+    final wasManualSend = _manualSendPending;
+    _manualSendPending = false;
+    
+    // Get the transcript (server STT sends it in onDone)
+    final transcript = _currentTranscript.trim();
+    
+    // Manual send ALWAYS sends (even if empty - though we could check)
+    if (wasManualSend) {
+      if (transcript.isEmpty) {
+        // Manual send but no transcript, just restart listening
+        _beginListening();
+        return;
+      }
+      _sendUserMessage(transcript);
+      return;
+    }
+    
+    // CRITICAL: If in background streaming mode, do NOT auto-send
+    // User must manually send to interrupt the LLM
+    // This prevents ambient noise from accidentally interrupting
+    if (_isBackgroundStreaming) {
+      // Just restart listening to continue accumulating transcript
+      _beginListening();
+      return;
+    }
+    
+    // Normal flow: auto-send when VAD completes
+    if (transcript.isNotEmpty) {
+      _sendUserMessage(transcript);
+    } else {
+      // No input, restart listening
+      _beginListening();
     }
   }
 
-  String _accumulatedResponse = '';
-  bool _isSpeaking = false;
+  Future<void> manualSend() async {
+    if (_state != VoiceCallState.listening) return;
+
+    // Set flag so onDone knows this was a manual send (not auto-VAD)
+    _manualSendPending = true;
+    
+    // Reset VAD pause if active
+    if (_vadPaused) {
+      _vadPaused = false;
+      _vadPausedController.add(false);
+    }
+    
+    // If interrupting background stream, exit that mode
+    _isBackgroundStreaming = false;
+    
+    // Force VAD to complete by stopping the voice input
+    // This will trigger onDone callback with the transcript
+    await _voiceInput.stopListening();
+    
+    // Note: onDone will handle actually sending the message
+  }
+
+  // ============================================================================
+  // Processing phase
+  // ============================================================================
+
+  void _sendUserMessage(String text) {
+    if (_isDisposed) return;
+
+    // Increment generation to ignore the OLD streaming response
+    // The old response stays in chat history, but new streaming won't mix with it
+    _messageGeneration++;
+    
+    // Clear state for new response
+    _currentTranscript = '';
+    _streamingResponse = '';
+    _responseComplete = false;
+    _sentencesToSpeak.clear();
+    _sentencesProcessed = 0;
+    _isBackgroundStreaming = false;
+    
+    _updateState(VoiceCallState.processing);
+    
+    // Send to chat service
+    sendMessageFromService(_ref, text, null);
+  }
 
   void _handleSocketEvent(
     Map<String, dynamic> event,
@@ -283,146 +409,206 @@ class VoiceCallService {
   ) {
     if (_isDisposed) return;
 
+    // Capture generation at start to filter stale responses
+    final currentGeneration = _messageGeneration;
+
     final outerData = event['data'];
+    if (outerData is! Map<String, dynamic>) return;
 
-    if (outerData is Map<String, dynamic>) {
-      final eventType = outerData['type']?.toString();
-      final innerData = outerData['data'];
+    final eventType = outerData['type']?.toString();
+    final innerData = outerData['data'];
 
-      if (eventType == 'chat:completion' && innerData is Map<String, dynamic>) {
-        // Handle full content replacement (used by some models/backends)
-        if (innerData.containsKey('content')) {
-          final content = innerData['content']?.toString() ?? '';
-          if (content.isNotEmpty) {
-            _accumulatedResponse = content;
-            _responseController.add(content);
-          }
+    if (eventType != 'chat:completion' || innerData is! Map<String, dynamic>) {
+      return;
+    }
+
+    // Ignore stale responses from previous messages
+    if (currentGeneration != _messageGeneration) return;
+
+    // Handle full content replacement
+    if (innerData.containsKey('content')) {
+      final content = innerData['content']?.toString() ?? '';
+      if (content.isNotEmpty && currentGeneration == _messageGeneration) {
+        _streamingResponse = content;
+        _responseController.add(content);
+        _onResponseChunk?.call();
+        _processResponseChunk();
+      }
+    }
+
+    // Handle streaming delta
+    if (innerData.containsKey('choices')) {
+      final choices = innerData['choices'] as List?;
+      if (choices == null || choices.isEmpty) return;
+
+      final firstChoice = choices[0] as Map<String, dynamic>?;
+      final delta = firstChoice?['delta'];
+      final finishReason = firstChoice?['finish_reason'];
+
+      if (delta is Map<String, dynamic>) {
+        final deltaContent = delta['content']?.toString() ?? '';
+        if (deltaContent.isNotEmpty && currentGeneration == _messageGeneration) {
+          _streamingResponse += deltaContent;
+          _responseController.add(_streamingResponse);
+          _onResponseChunk?.call();
+          _processResponseChunk();
         }
+      }
 
-        // Handle streaming delta chunks (incremental updates)
-        if (innerData.containsKey('choices')) {
-          final choices = innerData['choices'] as List?;
-          if (choices != null && choices.isNotEmpty) {
-            final firstChoice = choices[0] as Map<String, dynamic>?;
-            final delta = firstChoice?['delta'];
-            final finishReason = firstChoice?['finish_reason'];
-
-            // Extract incremental content from delta
-            if (delta is Map<String, dynamic>) {
-              final deltaContent = delta['content']?.toString() ?? '';
-              if (deltaContent.isNotEmpty) {
-                _accumulatedResponse += deltaContent;
-                _responseController.add(_accumulatedResponse);
-              }
-            }
-
-            // Check for completion
-            if (finishReason == 'stop') {
-              if (_accumulatedResponse.isNotEmpty && !_isSpeaking) {
-                _speakResponse(_accumulatedResponse);
-                _accumulatedResponse = '';
-              } else if (_accumulatedResponse.isEmpty) {
-                // No response, restart listening unless paused
-                if (_pauseReasons.isEmpty) {
-                  _startListening();
-                } else if (_state != VoiceCallState.paused) {
-                  _updateState(VoiceCallState.paused);
-                }
-              }
-            }
-          }
-        }
+      if (finishReason == 'stop' && currentGeneration == _messageGeneration) {
+        _responseComplete = true;
+        _processResponseChunk();
       }
     }
   }
 
-  Future<void> _speakResponse(String response) async {
-    if (_isDisposed || _isSpeaking) return;
+  void _processResponseChunk() {
+    if (_isDisposed || _streamingResponse.isEmpty) return;
+
+    // Convert markdown to clean text
+    final cleanText = MarkdownToText.convert(_streamingResponse);
+    if (cleanText.isEmpty) return;
+
+    // Split into sentences
+    final allSentences = _tts.splitTextForSpeech(cleanText);
+    
+    // Determine new sentences to queue
+    List<String> newSentences;
+    if (_responseComplete) {
+      // Response complete, queue all remaining sentences
+      newSentences = allSentences.skip(_sentencesProcessed).toList();
+    } else {
+      // Response streaming, only queue complete sentences (leave last one)
+      if (allSentences.length > _sentencesProcessed + 1) {
+        newSentences = allSentences
+            .skip(_sentencesProcessed)
+            .take(allSentences.length - _sentencesProcessed - 1)
+            .toList();
+      } else {
+        newSentences = [];
+      }
+    }
+
+    // Add new sentences to queue
+    for (final sentence in newSentences) {
+      if (sentence.trim().isNotEmpty) {
+        _sentencesToSpeak.add(sentence);
+        _sentencesProcessed++;
+      }
+    }
+
+    // If in background streaming mode, don't speak
+    // Just stay listening, response accumulates in background
+    if (_isBackgroundStreaming) {
+      // Response streams silently while user prepares their response
+      return;
+    }
+    
+    // Normal flow: start speaking if not already
+    if (!_isSpeaking && _sentencesToSpeak.isNotEmpty) {
+      _speakNextSentence();
+    } else if (_responseComplete && _sentencesToSpeak.isEmpty && !_isSpeaking) {
+      // Response complete with nothing to speak, return to listening
+      _beginListening();
+    }
+  }
+
+  // ============================================================================
+  // Speaking phase
+  // ============================================================================
+
+  Future<void> _speakNextSentence() async {
+    if (_isDisposed || _isSpeaking || _sentencesToSpeak.isEmpty) return;
+
+    _isSpeaking = true;
+    _pauseReasons.add(VoiceCallPauseReason.system);
+    
+    // Ensure listening is fully stopped
+    await _stopListening();
+    
+    _updateState(VoiceCallState.speaking);
+
+    final sentence = _sentencesToSpeak.removeAt(0);
 
     try {
-      _isSpeaking = true;
-
-      // Stop listening before speaking
-      await _voiceInput.stopListening();
-      await _transcriptSubscription?.cancel();
-      await _intensitySubscription?.cancel();
-
-      _updateState(VoiceCallState.speaking);
-
-      // Convert markdown to clean text for TTS
-      final cleanText = MarkdownToText.convert(response);
-      if (cleanText.isEmpty) {
-        // No speakable content, restart listening
-        _isSpeaking = false;
-        await _startListening();
-        return;
-      }
-
-      await _tts.speak(cleanText);
-      // After speaking completes, _handleTtsComplete will restart listening
+      await _tts.speak(sentence);
     } catch (e) {
       _isSpeaking = false;
+      _pauseReasons.remove(VoiceCallPauseReason.system);
       _updateState(VoiceCallState.error);
-      // Restart listening even if TTS fails
-      await _startListening();
     }
   }
 
-  void _handleTtsStart() {
+  void _onTtsStart() {
     if (_isDisposed) return;
     _updateState(VoiceCallState.speaking);
   }
 
-  void _handleTtsComplete() {
+  void _onTtsComplete() {
     if (_isDisposed) return;
+    
     _isSpeaking = false;
-    // After assistant finishes speaking, resume only if not paused
-    if (_pauseReasons.isNotEmpty) {
-      _listeningPaused = true;
-      _updateState(VoiceCallState.paused);
+    _pauseReasons.remove(VoiceCallPauseReason.system);
+
+    // Continue speaking if more sentences queued
+    if (_sentencesToSpeak.isNotEmpty) {
+      _speakNextSentence();
       return;
     }
-    _startListening();
+
+    // No more queued sentences
+    if (_responseComplete) {
+      // Response fully delivered, return to listening
+      if (_pauseReasons.isEmpty) {
+        _beginListening();
+      } else {
+        _updateState(VoiceCallState.paused);
+      }
+    } else {
+      // Response still streaming, wait for more
+      // This shouldn't normally happen (we should have more sentences or be complete)
+      // But if it does, stay in processing
+      if (!_isBackgroundStreaming) {
+        _updateState(VoiceCallState.processing);
+      }
+    }
   }
 
-  void _handleTtsError(String error) {
+  void _onTtsError(String error) {
     if (_isDisposed) return;
+    
+    _isSpeaking = false;
+    _pauseReasons.remove(VoiceCallPauseReason.system);
     _updateState(VoiceCallState.error);
-    // Try to recover by restarting listening
-    _startListening();
   }
 
-  Future<void> stopCall() async {
+  Future<void> muteSpeaking() async {
     if (_isDisposed) return;
 
-    // Cancel keep-alive timer
-    _keepAliveTimer?.cancel();
-    _keepAliveTimer = null;
-
-    await _transcriptSubscription?.cancel();
-    await _intensitySubscription?.cancel();
-    _socketSubscription?.dispose();
-
-    await _voiceInput.stopListening();
+    // Stop TTS audio but preserve response data
     await _tts.stop();
+    _isSpeaking = false;
+    _sentencesToSpeak.clear();
+    _pauseReasons.remove(VoiceCallPauseReason.system);
 
-    await BackgroundStreamingHandler.instance.stopBackgroundExecution(const [
-      _voiceCallStreamId,
-    ]);
-
-    // Cancel notification
-    await _notificationService.cancelNotification();
-
-    // Disable wake lock when call ends
-    await WakelockPlus.disable();
-
-    _sessionId = null;
-    _accumulatedTranscript = '';
-    _isMuted = false;
-    _listeningPaused = false;
-    _pauseReasons.clear();
-    _updateState(VoiceCallState.disconnected);
+    // Enable background streaming mode if response not complete
+    // This allows LLM to continue streaming while user prepares response
+    if (!_responseComplete) {
+      _isBackgroundStreaming = true;
+    }
+    
+    // ALWAYS return to listening when muted (unless other pause reasons)
+    // This allows user to prepare interrupt while LLM streams in background
+    if (_pauseReasons.isEmpty) {
+      await _beginListening();
+    } else {
+      _updateState(VoiceCallState.paused);
+    }
   }
+
+  // ============================================================================
+  // Pause/Resume
+  // ============================================================================
 
   Future<void> pauseListening({
     VoiceCallPauseReason reason = VoiceCallPauseReason.user,
@@ -431,14 +617,10 @@ class VoiceCallService {
 
     final wasEmpty = _pauseReasons.isEmpty;
     _pauseReasons.add(reason);
-    if (!wasEmpty) {
-      return;
-    }
 
-    _listeningPaused = true;
-    await _voiceInput.stopListening();
-    await _transcriptSubscription?.cancel();
-    await _intensitySubscription?.cancel();
+    if (!wasEmpty) return;
+
+    await _stopListening();
 
     if (_state == VoiceCallState.listening) {
       _updateState(VoiceCallState.paused);
@@ -451,37 +633,46 @@ class VoiceCallService {
     if (_isDisposed) return;
 
     _pauseReasons.remove(reason);
-    if (_pauseReasons.isNotEmpty) {
+
+    if (_pauseReasons.isNotEmpty) return;
+
+    if (_state == VoiceCallState.paused) {
+      await _beginListening();
+    }
+  }
+
+  // ============================================================================
+  // VAD pause
+  // ============================================================================
+
+  void pauseVad() {
+    if (!_voiceInput.usingServerStt || _state != VoiceCallState.listening) {
       return;
     }
-
-    if (_state == VoiceCallState.paused || _listeningPaused) {
-      await _startListening();
-    }
+    _vadPaused = true;
+    _vadPausedController.add(true);
+    _voiceInput.pauseVad();
   }
 
-  Future<void> cancelSpeaking() async {
-    if (_isDisposed) return;
-    await _tts.stop();
-    _isSpeaking = false;
-    _accumulatedResponse = '';
-    // Immediately restart listening
-    await _startListening();
+  void resumeVad() {
+    if (!_vadPaused) return;
+    _vadPaused = false;
+    _vadPausedController.add(false);
+    _voiceInput.resumeVad();
   }
+
+  // ============================================================================
+  // Notification
+  // ============================================================================
 
   void _updateState(VoiceCallState newState) {
     if (_isDisposed) return;
     _state = newState;
     _stateController.add(newState);
-
-    // Update notification when state changes (fire and forget)
-    _updateNotification().catchError((e) {
-      // Ignore notification errors
-    });
+    _updateNotification();
   }
 
   Future<void> _updateNotification() async {
-    // Skip notification for idle, error, and disconnected states
     if (_state == VoiceCallState.idle ||
         _state == VoiceCallState.error ||
         _state == VoiceCallState.disconnected) {
@@ -494,22 +685,18 @@ class VoiceCallService {
 
       await _notificationService.updateCallStatus(
         modelName: modelName,
-        isMuted: _isMuted,
+        isMuted: _pauseReasons.contains(VoiceCallPauseReason.mute),
         isSpeaking: _state == VoiceCallState.speaking,
-        isPaused:
-            _state == VoiceCallState.paused ||
-            (_pauseReasons.isNotEmpty && !_isSpeaking),
+        isPaused: _state == VoiceCallState.paused,
       );
     } catch (e) {
-      // Silently ignore notification errors
+      // Ignore notification errors
     }
   }
 
   void _handleNotificationAction(String action) {
     switch (action) {
       case 'mute_call':
-        _toggleMute();
-        break;
       case 'unmute_call':
         _toggleMute();
         break;
@@ -520,48 +707,31 @@ class VoiceCallService {
   }
 
   void _toggleMute() {
-    _isMuted = !_isMuted;
-    if (_isMuted) {
+    final isMuted = _pauseReasons.contains(VoiceCallPauseReason.mute);
+    if (isMuted) {
+      resumeListening(reason: VoiceCallPauseReason.mute);
+    } else {
       if (_isSpeaking) {
-        unawaited(_tts.stop());
-        _isSpeaking = false;
-        _accumulatedResponse = '';
+        muteSpeaking();
       }
       pauseListening(reason: VoiceCallPauseReason.mute);
-    } else {
-      resumeListening(reason: VoiceCallPauseReason.mute);
     }
-    _updateNotification();
   }
+
+  // ============================================================================
+  // Disposal
+  // ============================================================================
 
   Future<void> dispose() async {
     _isDisposed = true;
-
-    // Cancel keep-alive timer
-    _keepAliveTimer?.cancel();
-    _keepAliveTimer = null;
-
-    await _transcriptSubscription?.cancel();
-    await _intensitySubscription?.cancel();
-    _socketSubscription?.dispose();
-
+    await _cleanupCall();
     _voiceInput.dispose();
     await _tts.dispose();
-
-    // Cancel notification
-    await _notificationService.cancelNotification();
-
-    // Ensure wake lock is disabled on dispose
-    await WakelockPlus.disable();
-
-    await BackgroundStreamingHandler.instance.stopBackgroundExecution(const [
-      _voiceCallStreamId,
-    ]);
-
     await _stateController.close();
     await _transcriptController.close();
     await _responseController.close();
     await _intensityController.close();
+    await _vadPausedController.close();
   }
 }
 
@@ -583,9 +753,7 @@ VoiceCallService voiceCallService(Ref ref) {
     ref: ref,
   );
 
-  // Keep TTS settings in sync with app settings during a call
   ref.listen<AppSettings>(appSettingsProvider, (previous, next) {
-    // Update voice/engine and runtime parameters
     service._tts.updateSettings(
       voice: next.ttsVoice,
       serverVoice: next.ttsServerVoiceId,

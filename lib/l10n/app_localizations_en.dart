@@ -1203,4 +1203,19 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get transportModeWsInfo =>
       'Lower overhead, but may fail behind strict proxies/firewalls.';
+
+  @override
+  String get voiceCallTranscribing => 'Transcribing...';
+
+  @override
+  String get voiceCallSend => 'Send';
+
+  @override
+  String get voiceCallMute => 'Mute';
+
+  @override
+  String get voiceCallVadPaused => 'Tap to Resume';
+
+  @override
+  String get voiceCallListeningHold => 'Listening (Hold)';
 }

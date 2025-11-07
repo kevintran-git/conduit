@@ -1550,5 +1550,10 @@
   "transportModeWsInfo": "Lower overhead, but may fail behind strict proxies/firewalls.",
   "@transportModeWsInfo": {
     "description": "Footnote text for the WebSocket-only transport mode."
-  }
+  },
+  "voiceCallTranscribing": "Transcribing...",
+  "voiceCallSend": "Send",
+  "voiceCallMute": "Mute",
+  "voiceCallVadPaused": "Tap to Resume",
+  "voiceCallListeningHold": "Listening (Hold)"
 }
