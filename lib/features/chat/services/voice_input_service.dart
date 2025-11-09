@@ -45,6 +45,7 @@ class VoiceInputService {
   bool _hasDetectedSpeech = false;
   int _amplitudeCallbackCount = 0;
   Timer? _amplitudeFallbackTimer;
+  bool _vadPaused = false;
 
   Stream<String> get textStream =>
       _textStreamController?.stream ?? const Stream<String>.empty();
@@ -121,6 +122,8 @@ class VoiceInputService {
   bool get isAvailable =>
       _isInitialized && (_localSttAvailable || hasServerStt);
   bool get hasLocalStt => _localSttAvailable;
+  bool get usingServerStt => _usingServerStt;
+  bool get isVadPaused => _vadPaused;
 
   // Add a method to check if on-device STT is properly supported
   Future<bool> checkOnDeviceSupport() async {
@@ -354,6 +357,7 @@ class VoiceInputService {
 
     _usingServerStt = false;
     _hasDetectedSpeech = false;
+    _vadPaused = false;
   }
 
   Future<void> _stopLocalStt() async {
@@ -413,6 +417,7 @@ class VoiceInputService {
   Future<void> _startServerRecording() async {
     final path = await _createRecordingPath();
     _hasDetectedSpeech = false;
+    _vadPaused = false;
 
     await _recorder.startRecording(path);
 
@@ -449,6 +454,13 @@ class VoiceInputService {
     const double speechThreshold = 0.55;
     if (amplitude.isNaN || amplitude.isInfinite) return;
 
+    // If VAD is paused, don't process silence detection
+    if (_vadPaused) {
+      _silenceTimer?.cancel();
+      _silenceTimer = null;
+      return;
+    }
+
     if (amplitude > speechThreshold) {
       _hasDetectedSpeech = true;
       _silenceTimer?.cancel();
@@ -456,11 +468,36 @@ class VoiceInputService {
     } else if (_hasDetectedSpeech && _silenceTimer == null) {
       final silenceDuration = _ref?.read(appSettingsProvider).voiceSilenceDuration ?? 2000;
       _silenceTimer = Timer(Duration(milliseconds: silenceDuration), () {
-        if (_isListening && _usingServerStt) {
+        if (_isListening && _usingServerStt && !_vadPaused) {
           unawaited(_stopListening());
         }
       });
     }
+  }
+
+  /// Pause VAD auto-stop functionality (for "hold to think" mode)
+  /// Only works when using server STT
+  void pauseVad() {
+    if (!_isListening || !_usingServerStt) return;
+    _vadPaused = true;
+    _silenceTimer?.cancel();
+    _silenceTimer = null;
+  }
+
+  /// Resume VAD auto-stop functionality
+  /// Only works when using server STT
+  void resumeVad() {
+    if (!_isListening || !_usingServerStt) return;
+    _vadPaused = false;
+    // Reset detection state so user gets fresh silence timeout
+    _hasDetectedSpeech = false;
+  }
+
+  /// Manually submit current recording (same as what VAD does automatically)
+  /// Stops recording and sends audio to server for transcription
+  Future<void> submitRecording() async {
+    if (!_isListening) return;
+    await stopListening();
   }
 
   Future<String> _createRecordingPath() async {
