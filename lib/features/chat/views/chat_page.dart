@@ -552,6 +552,45 @@ class _ChatPageState extends ConsumerState<ChatPage> {
 
   // Replaced bottom-sheet chat list with left drawer (see ChatsDrawer)
 
+  /// Refreshes the active conversation and conversations list
+  Future<void> _refreshConversation() async {
+    // Reload active conversation messages from server
+    final api = ref.read(apiServiceProvider);
+    final active = ref.read(
+      activeConversationProvider,
+    );
+    if (api != null && active != null) {
+      try {
+        final full = await api.getConversation(
+          active.id,
+        );
+        ref
+            .read(
+              activeConversationProvider.notifier,
+            )
+            .set(full);
+      } catch (e) {
+        DebugLogger.log(
+          'Failed to refresh conversation: $e',
+          scope: 'chat/page',
+        );
+      }
+    }
+
+    // Also refresh the conversations list to reconcile missed events
+    // and keep timestamps/order in sync with the server.
+    try {
+      refreshConversationsCache(ref);
+      // Best-effort await to stabilize UI; ignore errors.
+      await ref.read(conversationsProvider.future);
+    } catch (_) {}
+
+    // Add small delay for better UX feedback
+    await Future.delayed(
+      const Duration(milliseconds: 300),
+    );
+  }
+
   void _onScroll() {
     if (!_scrollController.hasClients) return;
 
@@ -1596,6 +1635,19 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                         ),
                   actions: [
                     if (!_isSelectionMode) ...[
+                      // Refresh button - only show when there's an active conversation
+                      if (conversationId != null)
+                        IconButton(
+                          icon: Icon(
+                            Platform.isIOS
+                                ? CupertinoIcons.refresh
+                                : Icons.refresh_rounded,
+                            color: context.conduitTheme.textPrimary,
+                            size: IconSize.appBar,
+                          ),
+                          onPressed: _refreshConversation,
+                          tooltip: AppLocalizations.of(context)!.retry,
+                        ),
                       Padding(
                         padding: const EdgeInsets.only(
                           right: Spacing.inputPadding,
@@ -1639,43 +1691,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                           // Messages Area with pull-to-refresh
                           Expanded(
                             child: ConduitRefreshIndicator(
-                              onRefresh: () async {
-                                // Reload active conversation messages from server
-                                final api = ref.read(apiServiceProvider);
-                                final active = ref.read(
-                                  activeConversationProvider,
-                                );
-                                if (api != null && active != null) {
-                                  try {
-                                    final full = await api.getConversation(
-                                      active.id,
-                                    );
-                                    ref
-                                        .read(
-                                          activeConversationProvider.notifier,
-                                        )
-                                        .set(full);
-                                  } catch (e) {
-                                    DebugLogger.log(
-                                      'Failed to refresh conversation: $e',
-                                      scope: 'chat/page',
-                                    );
-                                  }
-                                }
-
-                                // Also refresh the conversations list to reconcile missed events
-                                // and keep timestamps/order in sync with the server.
-                                try {
-                                  refreshConversationsCache(ref);
-                                  // Best-effort await to stabilize UI; ignore errors.
-                                  await ref.read(conversationsProvider.future);
-                                } catch (_) {}
-
-                                // Add small delay for better UX feedback
-                                await Future.delayed(
-                                  const Duration(milliseconds: 300),
-                                );
-                              },
+                              onRefresh: _refreshConversation,
                               child: GestureDetector(
                                 behavior: HitTestBehavior.opaque,
                                 onTap: () {
