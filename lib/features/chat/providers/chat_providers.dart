@@ -1462,9 +1462,11 @@ Future<void> regenerateMessage(
       });
     } catch (_) {}
 
-    final registerDeltaListener = createConversationDeltaRegistrar(ref);
+    final effectiveSessionId =
+        response.socketSessionId ?? socketSessionId ?? sessionId;
 
-    final activeStream = attachUnifiedChunkedStreaming(
+    _setupStreamingForMessage(
+      ref: ref,
       stream: stream,
       webSearchEnabled: webSearchEnabled,
       assistantMessageId: assistantMessageId,
@@ -1472,76 +1474,7 @@ Future<void> regenerateMessage(
       modelItem: modelItem,
       sessionId: effectiveSessionId,
       activeConversationId: activeConversation.id,
-      api: api!,
-      socketService: socketService,
-      workerManager: ref.read(workerManagerProvider),
-      registerDeltaListener: registerDeltaListener,
-      appendToLastMessage: (c) =>
-          ref.read(chatMessagesProvider.notifier).appendToLastMessage(c),
-      replaceLastMessageContent: (c) =>
-          ref.read(chatMessagesProvider.notifier).replaceLastMessageContent(c),
-      updateLastMessageWith: (updater) => ref
-          .read(chatMessagesProvider.notifier)
-          .updateLastMessageWithFunction(updater),
-      appendStatusUpdate: (messageId, update) => ref
-          .read(chatMessagesProvider.notifier)
-          .appendStatusUpdate(messageId, update),
-      setFollowUps: (messageId, followUps) => ref
-          .read(chatMessagesProvider.notifier)
-          .setFollowUps(messageId, followUps),
-      upsertCodeExecution: (messageId, execution) => ref
-          .read(chatMessagesProvider.notifier)
-          .upsertCodeExecution(messageId, execution),
-      appendSourceReference: (messageId, reference) => ref
-          .read(chatMessagesProvider.notifier)
-          .appendSourceReference(messageId, reference),
-      updateMessageById: (messageId, updater) => ref
-          .read(chatMessagesProvider.notifier)
-          .updateMessageById(messageId, updater),
-      onChatTitleUpdated: (newTitle) {
-        final active = ref.read(activeConversationProvider);
-        if (active != null) {
-          ref
-              .read(activeConversationProvider.notifier)
-              .set(active.copyWith(title: newTitle));
-          ref
-              .read(conversationsProvider.notifier)
-              .updateConversation(
-                active.id,
-                (conversation) => conversation.copyWith(
-                  title: newTitle,
-                  updatedAt: DateTime.now(),
-                ),
-              );
-        }
-        refreshConversationsCache(ref);
-      },
-      onChatTagsUpdated: () {
-        refreshConversationsCache(ref);
-        final active = ref.read(activeConversationProvider);
-        final api = ref.read(apiServiceProvider);
-        if (active != null && api != null) {
-          Future.microtask(() async {
-            try {
-              final refreshed = await api.getConversation(active.id);
-              ref.read(activeConversationProvider.notifier).set(refreshed);
-              ref
-                  .read(conversationsProvider.notifier)
-                  .upsertConversation(refreshed.copyWith(messages: const []));
-            } catch (_) {}
-          });
-        }
-      },
-      finishStreaming: () =>
-          ref.read(chatMessagesProvider.notifier).finishStreaming(),
-      getMessages: () => ref.read(chatMessagesProvider),
     );
-    ref.read(chatMessagesProvider.notifier)
-      ..setMessageStream(activeStream.controller)
-      ..setSocketSubscriptions(
-        activeStream.socketSubscriptions,
-        onDispose: activeStream.disposeWatchdog,
-      );
     return;
   } catch (e) {
     rethrow;
@@ -2029,9 +1962,11 @@ Future<void> _sendMessageInternal(
       });
     } catch (_) {}
 
-    final registerDeltaListener = createConversationDeltaRegistrar(ref);
+    final effectiveSessionId =
+        response.socketSessionId ?? socketSessionId ?? sessionId;
 
-    final activeStream = attachUnifiedChunkedStreaming(
+    _setupStreamingForMessage(
+      ref: ref,
       stream: stream,
       webSearchEnabled: webSearchEnabled,
       assistantMessageId: assistantMessageId,
@@ -2039,77 +1974,7 @@ Future<void> _sendMessageInternal(
       modelItem: modelItem,
       sessionId: effectiveSessionId,
       activeConversationId: activeConversation?.id,
-      api: api!,
-      socketService: socketService,
-      workerManager: ref.read(workerManagerProvider),
-      registerDeltaListener: registerDeltaListener,
-      appendToLastMessage: (c) =>
-          ref.read(chatMessagesProvider.notifier).appendToLastMessage(c),
-      replaceLastMessageContent: (c) =>
-          ref.read(chatMessagesProvider.notifier).replaceLastMessageContent(c),
-      updateLastMessageWith: (updater) => ref
-          .read(chatMessagesProvider.notifier)
-          .updateLastMessageWithFunction(updater),
-      appendStatusUpdate: (messageId, update) => ref
-          .read(chatMessagesProvider.notifier)
-          .appendStatusUpdate(messageId, update),
-      setFollowUps: (messageId, followUps) => ref
-          .read(chatMessagesProvider.notifier)
-          .setFollowUps(messageId, followUps),
-      upsertCodeExecution: (messageId, execution) => ref
-          .read(chatMessagesProvider.notifier)
-          .upsertCodeExecution(messageId, execution),
-      appendSourceReference: (messageId, reference) => ref
-          .read(chatMessagesProvider.notifier)
-          .appendSourceReference(messageId, reference),
-      updateMessageById: (messageId, updater) => ref
-          .read(chatMessagesProvider.notifier)
-          .updateMessageById(messageId, updater),
-      onChatTitleUpdated: (newTitle) {
-        final active = ref.read(activeConversationProvider);
-        if (active != null) {
-          ref
-              .read(activeConversationProvider.notifier)
-              .set(active.copyWith(title: newTitle));
-          ref
-              .read(conversationsProvider.notifier)
-              .updateConversation(
-                active.id,
-                (conversation) => conversation.copyWith(
-                  title: newTitle,
-                  updatedAt: DateTime.now(),
-                ),
-              );
-        }
-        refreshConversationsCache(ref);
-      },
-      onChatTagsUpdated: () {
-        refreshConversationsCache(ref);
-        final active = ref.read(activeConversationProvider);
-        final api = ref.read(apiServiceProvider);
-        if (active != null && api != null) {
-          Future.microtask(() async {
-            try {
-              final refreshed = await api.getConversation(active.id);
-              ref.read(activeConversationProvider.notifier).set(refreshed);
-              ref
-                  .read(conversationsProvider.notifier)
-                  .upsertConversation(refreshed.copyWith(messages: const []));
-            } catch (_) {}
-          });
-        }
-      },
-      finishStreaming: () =>
-          ref.read(chatMessagesProvider.notifier).finishStreaming(),
-      getMessages: () => ref.read(chatMessagesProvider),
     );
-
-    ref.read(chatMessagesProvider.notifier)
-      ..setMessageStream(activeStream.controller)
-      ..setSocketSubscriptions(
-        activeStream.socketSubscriptions,
-        onDispose: activeStream.disposeWatchdog,
-      );
     return;
   } catch (e) {
     // Handle error - remove the assistant message placeholder
@@ -2502,6 +2367,105 @@ final stopGenerationProvider = Provider<void Function()>((ref) {
 });
 
 // ========== Shared Streaming Utilities ==========
+
+/// Shared helper to setup streaming for both sendMessage and regenerateMessage.
+/// Eliminates ~150 lines of code duplication.
+ActiveSocketStream _setupStreamingForMessage({
+  required dynamic ref,
+  required Stream<String> stream,
+  required bool webSearchEnabled,
+  required String assistantMessageId,
+  required String modelId,
+  required Map<String, dynamic> modelItem,
+  required String? sessionId,
+  required String? activeConversationId,
+}) {
+  final registerDeltaListener = createConversationDeltaRegistrar(ref);
+  final api = ref.read(apiServiceProvider);
+  final socketService = ref.read(socketServiceProvider);
+
+  final activeStream = attachUnifiedChunkedStreaming(
+    stream: stream,
+    webSearchEnabled: webSearchEnabled,
+    assistantMessageId: assistantMessageId,
+    modelId: modelId,
+    modelItem: modelItem,
+    sessionId: sessionId,
+    activeConversationId: activeConversationId,
+    api: api!,
+    socketService: socketService,
+    workerManager: ref.read(workerManagerProvider),
+    registerDeltaListener: registerDeltaListener,
+    appendToLastMessage: (c) =>
+        ref.read(chatMessagesProvider.notifier).appendToLastMessage(c),
+    replaceLastMessageContent: (c) =>
+        ref.read(chatMessagesProvider.notifier).replaceLastMessageContent(c),
+    updateLastMessageWith: (updater) => ref
+        .read(chatMessagesProvider.notifier)
+        .updateLastMessageWithFunction(updater),
+    appendStatusUpdate: (messageId, update) => ref
+        .read(chatMessagesProvider.notifier)
+        .appendStatusUpdate(messageId, update),
+    setFollowUps: (messageId, followUps) => ref
+        .read(chatMessagesProvider.notifier)
+        .setFollowUps(messageId, followUps),
+    upsertCodeExecution: (messageId, execution) => ref
+        .read(chatMessagesProvider.notifier)
+        .upsertCodeExecution(messageId, execution),
+    appendSourceReference: (messageId, reference) => ref
+        .read(chatMessagesProvider.notifier)
+        .appendSourceReference(messageId, reference),
+    updateMessageById: (messageId, updater) => ref
+        .read(chatMessagesProvider.notifier)
+        .updateMessageById(messageId, updater),
+    onChatTitleUpdated: (newTitle) {
+      final active = ref.read(activeConversationProvider);
+      if (active != null) {
+        ref
+            .read(activeConversationProvider.notifier)
+            .set(active.copyWith(title: newTitle));
+        ref
+            .read(conversationsProvider.notifier)
+            .updateConversation(
+              active.id,
+              (conversation) => conversation.copyWith(
+                title: newTitle,
+                updatedAt: DateTime.now(),
+              ),
+            );
+      }
+      refreshConversationsCache(ref);
+    },
+    onChatTagsUpdated: () {
+      refreshConversationsCache(ref);
+      final active = ref.read(activeConversationProvider);
+      final api = ref.read(apiServiceProvider);
+      if (active != null && api != null) {
+        Future.microtask(() async {
+          try {
+            final refreshed = await api.getConversation(active.id);
+            ref.read(activeConversationProvider.notifier).set(refreshed);
+            ref
+                .read(conversationsProvider.notifier)
+                .upsertConversation(refreshed.copyWith(messages: const []));
+          } catch (_) {}
+        });
+      }
+    },
+    finishStreaming: () =>
+        ref.read(chatMessagesProvider.notifier).finishStreaming(),
+    getMessages: () => ref.read(chatMessagesProvider),
+  );
+
+  ref.read(chatMessagesProvider.notifier)
+    ..setMessageStream(activeStream.controller)
+    ..setSocketSubscriptions(
+      activeStream.socketSubscriptions,
+      onDispose: activeStream.disposeWatchdog,
+    );
+
+  return activeStream;
+}
 
 // ========== Tool Servers (OpenAPI) Helpers ==========
 
