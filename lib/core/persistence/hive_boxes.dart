@@ -15,6 +15,7 @@ final class HiveStoreKeys {
 
   // Cache entries
   static const String localConversations = 'local_conversations';
+  static const String localFolders = 'local_folders';
   static const String attachmentQueueEntries = 'attachment_queue_entries';
   static const String taskQueue = 'outbound_task_queue_v1';
 }

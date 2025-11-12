@@ -135,7 +135,7 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
   required String assistantMessageId,
   required String modelId,
   required Map<String, dynamic> modelItem,
-  required String? sessionId,
+  required String sessionId,
   required String? activeConversationId,
   required ApiService api,
   required SocketService? socketService,
@@ -238,7 +238,6 @@ ActiveSocketStream attachUnifiedChunkedStreaming({
       'conversationId': activeConversationId,
       'messageId': assistantMessageId,
       'modelId': modelId,
-      if (sessionId != null) 'sessionId': sessionId,
     },
   );
   api.registerPersistentStreamForMessage(assistantMessageId, streamId);

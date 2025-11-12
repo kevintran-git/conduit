@@ -4,6 +4,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:hive_ce/hive.dart';
 
 import '../models/conversation.dart';
+import '../models/folder.dart';
 import '../models/server_config.dart';
 import '../persistence/hive_boxes.dart';
 import '../persistence/persistence_keys.dart';
@@ -40,6 +41,7 @@ class OptimizedStorageService {
   static const String _themePaletteKey = PreferenceKeys.themePalette;
   static const String _localeCodeKey = PreferenceKeys.localeCode;
   static const String _localConversationsKey = HiveStoreKeys.localConversations;
+  static const String _localFoldersKey = HiveStoreKeys.localFolders;
   static const String _onboardingSeenKey = PreferenceKeys.onboardingSeen;
   static const String _reviewerModeKey = PreferenceKeys.reviewerMode;
 
@@ -304,7 +306,7 @@ class OptimizedStorageService {
       }
       final parsed = await _workerManager
           .schedule<Map<String, dynamic>, List<Map<String, dynamic>>>(
-            _decodeStoredConversationsWorker,
+            _decodeStoredJsonListWorker,
             {'stored': stored},
             debugLabel: 'decode_local_conversations',
           );
@@ -326,8 +328,8 @@ class OptimizedStorageService {
           .map((conversation) => conversation.toJson())
           .toList();
       final serialized = await _workerManager
-          .schedule<Map<String, dynamic>, String>(_encodeConversationsWorker, {
-            'conversations': jsonReady,
+          .schedule<Map<String, dynamic>, String>(_encodeJsonListWorker, {
+            'items': jsonReady,
           }, debugLabel: 'encode_local_conversations');
       await _cachesBox.put(_localConversationsKey, serialized);
       DebugLogger.log(
@@ -337,6 +339,52 @@ class OptimizedStorageService {
     } catch (error, stack) {
       DebugLogger.error(
         'Failed to save local conversations',
+        scope: 'storage/optimized',
+        error: error,
+        stackTrace: stack,
+      );
+    }
+  }
+
+  Future<List<Folder>> getLocalFolders() async {
+    try {
+      final stored = _cachesBox.get(_localFoldersKey);
+      if (stored == null) {
+        return const [];
+      }
+      final parsed = await _workerManager
+          .schedule<Map<String, dynamic>, List<Map<String, dynamic>>>(
+            _decodeStoredJsonListWorker,
+            {'stored': stored},
+            debugLabel: 'decode_local_folders',
+          );
+      return parsed.map(Folder.fromJson).toList(growable: false);
+    } catch (error, stack) {
+      DebugLogger.error(
+        'Failed to retrieve local folders',
+        scope: 'storage/optimized',
+        error: error,
+        stackTrace: stack,
+      );
+      return const [];
+    }
+  }
+
+  Future<void> saveLocalFolders(List<Folder> folders) async {
+    try {
+      final jsonReady = folders.map((folder) => folder.toJson()).toList();
+      final serialized = await _workerManager
+          .schedule<Map<String, dynamic>, String>(_encodeJsonListWorker, {
+            'items': jsonReady,
+          }, debugLabel: 'encode_local_folders');
+      await _cachesBox.put(_localFoldersKey, serialized);
+      DebugLogger.log(
+        'Saved ${folders.length} local folders',
+        scope: 'storage/optimized',
+      );
+    } catch (error, stack) {
+      DebugLogger.error(
+        'Failed to save local folders',
         scope: 'storage/optimized',
         error: error,
         stackTrace: stack,
@@ -458,7 +506,7 @@ class OptimizedStorageService {
   }
 }
 
-List<Map<String, dynamic>> _decodeStoredConversationsWorker(
+List<Map<String, dynamic>> _decodeStoredJsonListWorker(
   Map<String, dynamic> payload,
 ) {
   final stored = payload['stored'];
@@ -483,8 +531,8 @@ List<Map<String, dynamic>> _decodeStoredConversationsWorker(
   return <Map<String, dynamic>>[];
 }
 
-String _encodeConversationsWorker(Map<String, dynamic> payload) {
-  final raw = payload['conversations'];
+String _encodeJsonListWorker(Map<String, dynamic> payload) {
+  final raw = payload['items'] ?? payload['conversations'];
   if (raw is List) {
     return jsonEncode(raw);
   }

@@ -19,25 +19,38 @@ sealed class Folder with _$Folder {
   }) = _Folder;
 
   factory Folder.fromJson(Map<String, dynamic> json) {
-    // Extract conversation IDs from items.chats if available
-    final items = json['items'] as Map<String, dynamic>?;
-    final chats = items?['chats'] as List?;
+    List<String> extractConversationIds(dynamic source) {
+      if (source is! List) {
+        return const <String>[];
+      }
+      final ids = <String>[];
+      for (final entry in source) {
+        String value = '';
+        if (entry is String) {
+          value = entry;
+        } else if (entry is Map<String, dynamic>) {
+          final id = entry['id'];
+          if (id is String) {
+            value = id;
+          } else if (id != null) {
+            value = id.toString();
+          }
+        } else if (entry != null) {
+          value = entry.toString();
+        }
 
-    // Handle both string IDs and conversation objects
-    final conversationIds =
-        chats
-            ?.map((chat) {
-              if (chat is String) {
-                return chat;
-              } else if (chat is Map<String, dynamic>) {
-                return chat['id'] as String? ?? '';
-              }
-              return '';
-            })
-            .where((id) => id.isNotEmpty)
-            .toList()
-            .cast<String>() ??
-        <String>[];
+        if (value.isNotEmpty) {
+          ids.add(value);
+        }
+      }
+      return ids;
+    }
+
+    final items = json['items'] as Map<String, dynamic>?;
+    final chats = items?['chats'];
+    final explicitIds = extractConversationIds(json['conversation_ids']);
+    final implicitIds = extractConversationIds(chats);
+    final conversationIds = explicitIds.isNotEmpty ? explicitIds : implicitIds;
 
     // Handle Unix timestamp conversion
     DateTime? parseTimestamp(dynamic timestamp) {
@@ -65,5 +78,31 @@ sealed class Folder with _$Folder {
       data: json['data'] as Map<String, dynamic>?,
       items: json['items'] as Map<String, dynamic>?,
     );
+  }
+}
+
+extension FolderJsonExtension on Folder {
+  Map<String, dynamic> toJson() {
+    Map<String, dynamic>? normalizedItems;
+    if (items != null) {
+      normalizedItems = Map<String, dynamic>.from(items!);
+    } else if (conversationIds.isNotEmpty) {
+      normalizedItems = {'chats': List<String>.from(conversationIds)};
+    }
+
+    return {
+      'id': id,
+      'name': name,
+      if (parentId != null) 'parent_id': parentId,
+      if (userId != null) 'user_id': userId,
+      if (createdAt != null) 'created_at': createdAt!.toIso8601String(),
+      if (updatedAt != null) 'updated_at': updatedAt!.toIso8601String(),
+      'is_expanded': isExpanded,
+      if (normalizedItems != null) 'items': normalizedItems,
+      if (meta != null) 'meta': Map<String, dynamic>.from(meta!),
+      if (data != null) 'data': Map<String, dynamic>.from(data!),
+      if (conversationIds.isNotEmpty)
+        'conversation_ids': List<String>.from(conversationIds),
+    };
   }
 }

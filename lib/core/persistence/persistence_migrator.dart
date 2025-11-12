@@ -107,7 +107,24 @@ class PersistenceMigrator {
   }
 
   Future<void> _migrateCaches(SharedPreferences prefs) async {
-    final jsonString = prefs.getString(HiveStoreKeys.localConversations);
+    await _migrateJsonListCache(
+      prefs,
+      HiveStoreKeys.localConversations,
+      logLabel: 'local conversations',
+    );
+    await _migrateJsonListCache(
+      prefs,
+      HiveStoreKeys.localFolders,
+      logLabel: 'local folders',
+    );
+  }
+
+  Future<void> _migrateJsonListCache(
+    SharedPreferences prefs,
+    String key, {
+    required String logLabel,
+  }) async {
+    final jsonString = prefs.getString(key);
     if (jsonString == null || jsonString.isEmpty) {
       return;
     }
@@ -118,11 +135,11 @@ class PersistenceMigrator {
         final list = decoded
             .map((entry) => Map<String, dynamic>.from(entry as Map))
             .toList(growable: false);
-        await _boxes.caches.put(HiveStoreKeys.localConversations, list);
+        await _boxes.caches.put(key, list);
       }
     } catch (error, stack) {
       DebugLogger.error(
-        'Failed to migrate local conversations',
+        'Failed to migrate $logLabel',
         scope: 'persistence/migration',
         error: error,
         stackTrace: stack,
@@ -206,6 +223,7 @@ class PersistenceMigrator {
       PreferenceKeys.onboardingSeen,
       PreferenceKeys.reviewerMode,
       HiveStoreKeys.localConversations,
+      HiveStoreKeys.localFolders,
       HiveStoreKeys.attachmentQueueEntries,
       LegacyPreferenceKeys.attachmentUploadQueue,
       LegacyPreferenceKeys.taskQueue,

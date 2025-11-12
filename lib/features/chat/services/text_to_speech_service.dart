@@ -11,6 +11,13 @@ import '../../../core/services/settings_service.dart';
 
 typedef _SpeechChunk = ({Uint8List bytes, String mimeType});
 
+class SpeechAudioChunk {
+  const SpeechAudioChunk({required this.bytes, required this.mimeType});
+
+  final Uint8List bytes;
+  final String mimeType;
+}
+
 /// Lightweight wrapper around FlutterTts to centralize configuration
 class TextToSpeechService {
   final FlutterTts _tts = FlutterTts();
@@ -45,6 +52,7 @@ class TextToSpeechService {
   bool get isAvailable => _available;
   bool get deviceEngineAvailable => _deviceEngineAvailable;
   bool get serverEngineAvailable => _api != null;
+  bool get prefersServerEngine => _shouldUseServer();
 
   TextToSpeechService({ApiService? api}) : _api = api {
     // Wire minimal player events to callbacks
@@ -275,6 +283,29 @@ class TextToSpeechService {
       _onError?.call('Text-to-speech engine returned code $result');
     }
     _onSentenceIndex?.call(0);
+  }
+
+  Future<SpeechAudioChunk> synthesizeServerSpeechChunk(String text) async {
+    if (text.trim().isEmpty) {
+      throw ArgumentError('Cannot synthesize empty text');
+    }
+    if (_api == null) {
+      throw StateError('Server text-to-speech is unavailable');
+    }
+    if (!_initialized) {
+      await initialize(
+        deviceVoice: _preferredVoice,
+        serverVoice: _serverPreferredVoice,
+        engine: _engine,
+      );
+    }
+    final voice = await _resolveServerVoice();
+    final chunk = await _api.generateSpeech(
+      text: text,
+      voice: voice,
+      speed: _speechRate,
+    );
+    return SpeechAudioChunk(bytes: chunk.bytes, mimeType: chunk.mimeType);
   }
 
   Future<void> pause() async {
@@ -570,6 +601,15 @@ class TextToSpeechService {
     } finally {
       _serverDefaultVoiceFuture = null;
     }
+  }
+
+  Future<void> preloadServerDefaults() async {
+    if (_api == null) {
+      return;
+    }
+    try {
+      await _getServerDefaultVoice();
+    } catch (_) {}
   }
 
   // ===== Server chunked playback =====

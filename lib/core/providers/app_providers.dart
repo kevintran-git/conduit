@@ -1801,24 +1801,53 @@ class Folders extends _$Folders {
   Future<List<Folder>> build() async {
     if (!ref.watch(isAuthenticatedProvider2)) {
       DebugLogger.log('skip-unauthed', scope: 'folders');
+      _persistFoldersAsync(const []);
       return const [];
     }
+
+    final storage = ref.watch(optimizedStorageServiceProvider);
+    final cached = await storage.getLocalFolders();
+    if (cached.isNotEmpty) {
+      DebugLogger.log(
+        'cache-restored',
+        scope: 'folders/cache',
+        data: {'count': cached.length},
+      );
+      Future.microtask(() async {
+        try {
+          await refresh();
+        } catch (error, stackTrace) {
+          DebugLogger.error(
+            'warm-refresh-failed',
+            scope: 'folders/cache',
+            error: error,
+            stackTrace: stackTrace,
+          );
+        }
+      });
+      return _sort(cached);
+    }
+
+    DebugLogger.log('cache-empty', scope: 'folders/cache');
     final api = ref.watch(apiServiceProvider);
     if (api == null) {
       DebugLogger.warning('api-missing', scope: 'folders');
       return const [];
     }
-    return _load(api);
+    final fresh = await _load(api);
+    return fresh;
   }
 
   Future<void> refresh() async {
     if (!ref.read(isAuthenticatedProvider2)) {
       state = const AsyncData<List<Folder>>([]);
+      _persistFoldersAsync(const []);
       return;
     }
     final api = ref.read(apiServiceProvider);
     if (api == null) {
       state = const AsyncData<List<Folder>>([]);
+      _persistFoldersAsync(const []);
       return;
     }
     final result = await AsyncValue.guard(() => _load(api));
@@ -1835,7 +1864,9 @@ class Folders extends _$Folders {
     } else {
       updated.add(folder);
     }
-    state = AsyncData<List<Folder>>(_sort(updated));
+    final sorted = _sort(updated);
+    state = AsyncData<List<Folder>>(sorted);
+    _persistFoldersAsync(sorted);
   }
 
   void updateFolder(String id, Folder Function(Folder folder) transform) {
@@ -1845,7 +1876,9 @@ class Folders extends _$Folders {
     if (index < 0) return;
     final updated = <Folder>[...current];
     updated[index] = transform(updated[index]);
-    state = AsyncData<List<Folder>>(_sort(updated));
+    final sorted = _sort(updated);
+    state = AsyncData<List<Folder>>(sorted);
+    _persistFoldersAsync(sorted);
   }
 
   void removeFolder(String id) {
@@ -1854,7 +1887,9 @@ class Folders extends _$Folders {
     final updated = current
         .where((folder) => folder.id != id)
         .toList(growable: true);
-    state = AsyncData<List<Folder>>(_sort(updated));
+    final sorted = _sort(updated);
+    state = AsyncData<List<Folder>>(sorted);
+    _persistFoldersAsync(sorted);
   }
 
   Future<List<Folder>> _load(ApiService api) async {
@@ -1868,7 +1903,9 @@ class Folders extends _$Folders {
         scope: 'folders',
         data: {'count': folders.length},
       );
-      return _sort(folders);
+      final sorted = _sort(folders);
+      _persistFoldersAsync(sorted);
+      return sorted;
     } catch (e, stackTrace) {
       DebugLogger.error(
         'fetch-failed',
@@ -1878,6 +1915,11 @@ class Folders extends _$Folders {
       );
       return const [];
     }
+  }
+
+  void _persistFoldersAsync(List<Folder> folders) {
+    final storage = ref.read(optimizedStorageServiceProvider);
+    unawaited(storage.saveLocalFolders(folders));
   }
 
   List<Folder> _sort(List<Folder> input) {

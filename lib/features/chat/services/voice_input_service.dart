@@ -1,13 +1,13 @@
 import 'dart:async';
-import 'dart:io' show File, Platform;
+import 'dart:convert';
+import 'dart:io' show Platform;
+import 'dart:typed_data';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
-import 'package:mic_stream_recorder/mic_stream_recorder.dart';
 import 'package:stts/stts.dart';
-import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
+import 'package:vad/vad.dart';
 
 import '../../../core/providers/app_providers.dart';
 import '../../../core/services/api_service.dart';
@@ -23,7 +23,10 @@ class LocaleName {
 }
 
 class VoiceInputService {
-  final MicStreamRecorder _recorder = MicStreamRecorder();
+  static const int _vadSampleRate = 16000;
+  static const int _vadFrameSamples = 1536;
+
+  final VadHandler _vadHandler = VadHandler.create();
   final Stt _speech = Stt();
   final ApiService? _api;
   final Ref? _ref;
@@ -41,17 +44,17 @@ class VoiceInputService {
       _intensityController?.stream ?? const Stream<int>.empty();
   int _lastIntensity = 0;
   Timer? _intensityDecayTimer;
-  Timer? _silenceTimer;
-  bool _hasDetectedSpeech = false;
-  int _amplitudeCallbackCount = 0;
-  Timer? _amplitudeFallbackTimer;
+  List<double>? _vadPendingSamples;
 
   Stream<String> get textStream =>
       _textStreamController?.stream ?? const Stream<String>.empty();
   Timer? _autoStopTimer;
-  StreamSubscription<double>? _ampSub;
   StreamSubscription<SttRecognition>? _sttResultSub;
   StreamSubscription<SttState>? _sttStateSub;
+  StreamSubscription<List<double>>? _vadSpeechEndSub;
+  StreamSubscription<({double isSpeech, double notSpeech, List<double> frame})>?
+  _vadFrameSub;
+  StreamSubscription<String>? _vadErrorSub;
 
   bool get isSupportedPlatform => Platform.isAndroid || Platform.isIOS;
   bool get hasServerStt => _api != null;
@@ -60,9 +63,7 @@ class VoiceInputService {
   bool get prefersServerOnly => _preference == SttPreference.serverOnly;
   bool get prefersDeviceOnly => _preference == SttPreference.deviceOnly;
 
-  VoiceInputService({ApiService? api, Ref? ref})
-      : _api = api,
-        _ref = ref;
+  VoiceInputService({ApiService? api, Ref? ref}) : _api = api, _ref = ref;
 
   void updatePreference(SttPreference preference) {
     _preference = preference;
@@ -327,33 +328,27 @@ class VoiceInputService {
     _autoStopTimer?.cancel();
     _autoStopTimer = null;
 
-    _silenceTimer?.cancel();
-    _silenceTimer = null;
-
-    _amplitudeFallbackTimer?.cancel();
-    _amplitudeFallbackTimer = null;
-
     if (_usingServerStt) {
-      await _finalizeServerRecording();
+      await _stopVadRecording();
+      final samples = _vadPendingSamples;
+      _vadPendingSamples = null;
+      if (samples != null && samples.isNotEmpty) {
+        await _processVadSamples(samples);
+      }
     } else {
       await _stopLocalStt();
+      if (_currentText.isNotEmpty) {
+        _textStreamController?.add(_currentText);
+      }
     }
-
-    await _ampSub?.cancel();
-    _ampSub = null;
 
     _intensityDecayTimer?.cancel();
     _intensityDecayTimer = null;
     _lastIntensity = 0;
 
-    if (!_usingServerStt && _currentText.isNotEmpty) {
-      _textStreamController?.add(_currentText);
-    }
-
     await _closeControllers();
 
     _usingServerStt = false;
-    _hasDetectedSpeech = false;
   }
 
   Future<void> _stopLocalStt() async {
@@ -411,82 +406,100 @@ class VoiceInputService {
   }
 
   Future<void> _startServerRecording() async {
-    final path = await _createRecordingPath();
-    _hasDetectedSpeech = false;
+    await _setupVadStreams();
+    final settings = _ref?.read(appSettingsProvider);
+    final silenceMs = settings?.voiceSilenceDuration ?? 2000;
+    final redemptionFrames = _silenceDurationToFrames(silenceMs);
+    final endPadFrames = redemptionFrames > 4
+        ? (redemptionFrames / 4).round().clamp(1, redemptionFrames)
+        : 1;
 
-    await _recorder.startRecording(path);
+    try {
+      await _vadHandler.startListening(
+        frameSamples: _vadFrameSamples,
+        redemptionFrames: redemptionFrames,
+        endSpeechPadFrames: endPadFrames,
+        preSpeechPadFrames: 2,
+        minSpeechFrames: 3,
+        submitUserSpeechOnPause: true,
+        recordConfig: const RecordConfig(
+          encoder: AudioEncoder.pcm16bits,
+          sampleRate: _vadSampleRate,
+          numChannels: 1,
+          bitRate: 16,
+          echoCancel: true,
+          autoGain: true,
+          noiseSuppress: true,
+          androidConfig: AndroidRecordConfig(
+            audioSource: AndroidAudioSource.voiceCommunication,
+            audioManagerMode: AudioManagerMode.modeInCommunication,
+            speakerphone: true,
+            manageBluetooth: true,
+            useLegacy: false,
+          ),
+        ),
+      );
+    } catch (error) {
+      _textStreamController?.addError(error);
+      rethrow;
+    }
+  }
 
-    await _ampSub?.cancel();
-    _amplitudeFallbackTimer?.cancel();
-    _amplitudeCallbackCount = 0;
+  Future<void> _setupVadStreams() async {
+    await _vadSpeechEndSub?.cancel();
+    _vadSpeechEndSub = _vadHandler.onSpeechEnd.listen((samples) {
+      if (!_isListening || !_usingServerStt) return;
+      if (samples.isEmpty) return;
+      _vadPendingSamples = samples;
+      if (_isListening) {
+        unawaited(_stopListening());
+      }
+    });
 
-    _ampSub = _recorder.amplitudeStream.listen((amplitude) {
-      _amplitudeCallbackCount++;
+    await _vadFrameSub?.cancel();
+    _vadFrameSub = _vadHandler.onFrameProcessed.listen((frameData) {
       if (!_isListening) return;
-
-      _lastIntensity = _normalizedToIntensity(amplitude);
+      final intensity = _intensityFromVadFrame(frameData.frame);
+      _lastIntensity = intensity;
       try {
         _intensityController?.add(_lastIntensity);
       } catch (_) {}
-
-      _handleServerAmplitude(amplitude);
     });
 
-    _amplitudeFallbackTimer = Timer(const Duration(seconds: 1), () {
-      if (_amplitudeCallbackCount == 0) {
-        _silenceTimer = Timer(const Duration(seconds: 15), () {
-          if (_isListening && _usingServerStt) {
-            unawaited(_stopListening());
-          }
-        });
+    await _vadErrorSub?.cancel();
+    _vadErrorSub = _vadHandler.onError.listen((message) {
+      _textStreamController?.addError(Exception(message));
+      if (_isListening) {
+        unawaited(_stopListening());
       }
     });
   }
 
-  void _handleServerAmplitude(double amplitude) {
-    if (!_usingServerStt || !_isListening) return;
-
-    const double speechThreshold = 0.55;
-    if (amplitude.isNaN || amplitude.isInfinite) return;
-
-    if (amplitude > speechThreshold) {
-      _hasDetectedSpeech = true;
-      _silenceTimer?.cancel();
-      _silenceTimer = null;
-    } else if (_hasDetectedSpeech && _silenceTimer == null) {
-      final silenceDuration = _ref?.read(appSettingsProvider).voiceSilenceDuration ?? 2000;
-      _silenceTimer = Timer(Duration(milliseconds: silenceDuration), () {
-        if (_isListening && _usingServerStt) {
-          unawaited(_stopListening());
-        }
-      });
-    }
+  Future<void> _stopVadRecording() async {
+    try {
+      await _vadHandler.stopListening();
+    } catch (_) {}
+    await _vadSpeechEndSub?.cancel();
+    _vadSpeechEndSub = null;
+    await _vadFrameSub?.cancel();
+    _vadFrameSub = null;
+    await _vadErrorSub?.cancel();
+    _vadErrorSub = null;
   }
 
-  Future<String> _createRecordingPath() async {
-    final directory = await getTemporaryDirectory();
-    final timestamp = DateTime.now().millisecondsSinceEpoch;
-    final fileName = 'conduit_voice_$timestamp.m4a';
-    return p.join(directory.path, fileName);
-  }
-
-  Future<void> _finalizeServerRecording() async {
+  Future<void> _processVadSamples(List<double> samples) async {
     final api = _api;
     if (api == null) return;
 
-    final path = await _recorder.stopRecording();
-    if (path == null || path.isEmpty) return;
-
-    final file = File(path);
     try {
-      if (!await file.exists()) return;
-      final bytes = await file.readAsBytes();
-      if (bytes.isEmpty) return;
+      final wavBytes = _samplesToWav(samples);
+      final fileName =
+          'conduit_voice_${DateTime.now().millisecondsSinceEpoch}.wav';
 
       final response = await api.transcribeSpeech(
-        audioBytes: bytes,
-        fileName: p.basename(path),
-        mimeType: 'audio/mp4',
+        audioBytes: wavBytes,
+        fileName: fileName,
+        mimeType: 'audio/wav',
         language: _languageForServer(),
       );
 
@@ -499,18 +512,71 @@ class VoiceInputService {
       }
     } catch (error) {
       _textStreamController?.addError(error);
-    } finally {
-      unawaited(_cleanupRecordingFile(file));
     }
   }
 
-  Future<void> _cleanupRecordingFile(File file) async {
-    try {
-      if (await file.exists()) {
-        await file.delete();
-      }
-    } catch (_) {}
+  int _silenceDurationToFrames(int milliseconds) {
+    final frameDurationMs = (_vadFrameSamples / _vadSampleRate) * 1000;
+    final frames = (milliseconds / frameDurationMs).round();
+    return frames.clamp(4, 50);
   }
+
+  int _intensityFromVadFrame(List<double> frame) {
+    if (frame.isEmpty) return 0;
+    double peak = 0;
+    for (final sample in frame) {
+      final value = sample.abs();
+      if (value > peak) {
+        peak = value;
+      }
+    }
+    final scaled = (peak * 12).round();
+    return scaled.clamp(0, 10);
+  }
+
+  Uint8List _samplesToWav(List<double> samples) {
+    if (samples.isEmpty) {
+      return Uint8List(0);
+    }
+    final Int16List pcm = Int16List(samples.length);
+    for (var i = 0; i < samples.length; i++) {
+      final clamped = samples[i].clamp(-1.0, 1.0);
+      final scaled = (clamped * 32767).round().clamp(-32768, 32767);
+      pcm[i] = scaled;
+    }
+
+    final dataLength = pcm.lengthInBytes;
+    final bytesPerSample = 2;
+    final numChannels = 1;
+    final byteRate = _vadSampleRate * numChannels * bytesPerSample;
+    final blockAlign = numChannels * bytesPerSample;
+
+    final builder = BytesBuilder();
+    builder.add(ascii.encode('RIFF'));
+    builder.add(_int32Le(36 + dataLength));
+    builder.add(ascii.encode('WAVE'));
+    builder.add(ascii.encode('fmt '));
+    builder.add(_int32Le(16));
+    builder.add(_int16Le(1));
+    builder.add(_int16Le(numChannels));
+    builder.add(_int32Le(_vadSampleRate));
+    builder.add(_int32Le(byteRate));
+    builder.add(_int16Le(blockAlign));
+    builder.add(_int16Le(16));
+    builder.add(ascii.encode('data'));
+    builder.add(_int32Le(dataLength));
+    builder.add(Uint8List.view(pcm.buffer));
+    return builder.toBytes();
+  }
+
+  List<int> _int16Le(int value) => [value & 0xff, (value >> 8) & 0xff];
+
+  List<int> _int32Le(int value) => [
+    value & 0xff,
+    (value >> 8) & 0xff,
+    (value >> 16) & 0xff,
+    (value >> 24) & 0xff,
+  ];
 
   String? _languageForServer() {
     final locale = _selectedLocaleId;
@@ -611,11 +677,6 @@ class VoiceInputService {
     return null;
   }
 
-  int _normalizedToIntensity(double value) {
-    if (value.isNaN || value.isInfinite) return 0;
-    return (value * 10).round().clamp(0, 10);
-  }
-
   Future<void> _closeControllers() async {
     if (_textStreamController != null) {
       try {
@@ -647,7 +708,7 @@ class VoiceInputService {
 
   void dispose() {
     stopListening();
-    _silenceTimer?.cancel();
+    unawaited(_vadHandler.dispose());
     try {
       _speech.dispose().catchError((_) {});
     } catch (_) {}

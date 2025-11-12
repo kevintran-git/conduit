@@ -1170,7 +1170,9 @@ class ApiService {
         data,
         debugLabel: 'parse_file_search',
       );
-      return normalized.map(FileInfo.fromJson).toList(growable: false);
+      return normalized
+          .map(FileInfo.fromJson)
+          .toList(growable: false);
     }
     return const [];
   }
@@ -1184,7 +1186,9 @@ class ApiService {
         data,
         debugLabel: 'parse_file_all',
       );
-      return normalized.map(FileInfo.fromJson).toList(growable: false);
+      return normalized
+          .map(FileInfo.fromJson)
+          .toList(growable: false);
     }
     return const [];
   }
@@ -1595,7 +1599,10 @@ class ApiService {
     if (data is Map<String, dynamic>) {
       final voices = data['voices'];
       if (voices is List) {
-        return _normalizeList(voices, debugLabel: 'parse_voice_list');
+        return _normalizeList(
+          voices,
+          debugLabel: 'parse_voice_list',
+        );
       }
     }
     if (data is List) {
@@ -1788,7 +1795,10 @@ class ApiService {
     final response = await _dio.get('/api/v1/images/models');
     final data = response.data;
     if (data is List) {
-      return _normalizeList(data, debugLabel: 'parse_image_models');
+      return _normalizeList(
+        data,
+        debugLabel: 'parse_image_models',
+      );
     }
     return [];
   }
@@ -2486,7 +2496,7 @@ class ApiService {
   ({
     Stream<String> stream,
     String messageId,
-    String? sessionId,
+    String sessionId,
     String? socketSessionId,
     bool isBackgroundFlow,
   })
@@ -2512,9 +2522,10 @@ class ApiService {
         (responseMessageId != null && responseMessageId.isNotEmpty)
         ? responseMessageId
         : const Uuid().v4();
-    final bool hasSocketBinding =
-        sessionIdOverride != null && sessionIdOverride.isNotEmpty;
-    final String? sessionId = hasSocketBinding ? sessionIdOverride : null;
+    final sessionId =
+        (sessionIdOverride != null && sessionIdOverride.isNotEmpty)
+        ? sessionIdOverride
+        : const Uuid().v4().substring(0, 20);
 
     // NOTE: Previously used to branch for Gemini-specific handling; not needed now.
 
@@ -2665,20 +2676,14 @@ class ApiService {
     );
 
     // Attach identifiers to trigger background task processing on the server
-    if (sessionId != null) {
-      data['session_id'] = sessionId;
-    }
+    data['session_id'] = sessionId;
     data['id'] = messageId;
     if (conversationId != null) {
       data['chat_id'] = conversationId;
     }
 
-    final bool includeBackgroundTasks =
-        backgroundTasks != null &&
-        backgroundTasks.isNotEmpty &&
-        sessionId != null;
-
-    if (includeBackgroundTasks) {
+    // Attach background_tasks if provided
+    if (backgroundTasks != null && backgroundTasks.isNotEmpty) {
       data['background_tasks'] = backgroundTasks;
     }
 
@@ -2802,7 +2807,7 @@ class ApiService {
       messageId: messageId,
       sessionId: sessionId,
       socketSessionId: socketSessionId,
-      isBackgroundFlow: includeBackgroundTasks,
+      isBackgroundFlow: true,
     );
   }
 
@@ -3208,7 +3213,10 @@ class ApiService {
 
       final data = response.data;
       if (data is List) {
-        return _normalizeList(data, debugLabel: 'parse_message_search');
+        return _normalizeList(
+          data,
+          debugLabel: 'parse_message_search',
+        );
       }
       if (data is Map<String, dynamic>) {
         final list = (data['items'] ?? data['results'] ?? data['messages']);
