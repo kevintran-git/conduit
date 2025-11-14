@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import '../utils/debug_logger.dart';
 
@@ -136,6 +138,7 @@ class ApiAuthInterceptor extends Interceptor {
     final path = err.requestOptions.path;
 
     // Handle authentication errors consistently
+    // IMPORTANT: Never auto-logout. Instead, notify the app to show connection issue page
     if (statusCode == 401) {
       // Do not clear the token for public or optional-auth endpoints.
       // A 401 here may indicate endpoint-level permission or server config,
@@ -143,8 +146,9 @@ class ApiAuthInterceptor extends Interceptor {
       final requiresAuth = _requiresAuth(path);
       final optionalAuth = _hasOptionalAuth(path);
       if (requiresAuth && !optionalAuth) {
-        DebugLogger.auth('401 Unauthorized on $path - clearing auth token');
-        _clearAuthToken();
+        _notifyAuthFailure(
+          '401 Unauthorized on $path - notifying app without clearing token',
+        );
       } else {
         DebugLogger.auth(
           '401 on public/optional endpoint $path - keeping auth token',
@@ -155,10 +159,9 @@ class ApiAuthInterceptor extends Interceptor {
       final requiresAuth = _requiresAuth(path);
       final optionalAuth = _hasOptionalAuth(path);
       if (requiresAuth && !optionalAuth) {
-        DebugLogger.auth(
-          '403 Forbidden on protected endpoint $path - clearing auth token',
+        _notifyAuthFailure(
+          '403 Forbidden on protected endpoint $path - notifying app without clearing token',
         );
-        _clearAuthToken();
       } else {
         DebugLogger.auth(
           '403 Forbidden on public/optional endpoint $path - keeping auth token',
@@ -169,9 +172,23 @@ class ApiAuthInterceptor extends Interceptor {
     handler.next(err);
   }
 
+  /// Clear auth token and notify callbacks
+  /// Note: This should only be called for explicit logout, not for connection errors
   void _clearAuthToken() {
     _authToken = null;
+    final future = onTokenInvalidated?.call();
+    if (future != null) {
+      unawaited(future);
+    }
+  }
+
+  void _notifyAuthFailure(String message) {
+    DebugLogger.auth(message);
     onAuthTokenInvalid?.call();
-    onTokenInvalidated?.call();
+  }
+
+  /// Explicitly clear auth token for logout scenarios
+  void clearAuthTokenForLogout() {
+    _clearAuthToken();
   }
 }

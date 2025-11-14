@@ -3,16 +3,16 @@ import 'dart:io' show Platform;
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
+import '../../../core/auth/auth_state_manager.dart';
 import '../../../core/models/server_config.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../../core/services/connectivity_service.dart';
-import '../../../core/services/navigation_service.dart';
 import '../../../core/widgets/error_boundary.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../shared/theme/theme_extensions.dart';
 import '../../../shared/widgets/conduit_components.dart';
+import '../../../shared/widgets/themed_dialogs.dart';
 import '../providers/unified_auth_providers.dart';
 
 class ConnectionIssuePage extends ConsumerStatefulWidget {
@@ -25,6 +25,7 @@ class ConnectionIssuePage extends ConsumerStatefulWidget {
 
 class _ConnectionIssuePageState extends ConsumerState<ConnectionIssuePage> {
   bool _isLoggingOut = false;
+  bool _isRetrying = false;
   String? _statusMessage;
 
   @override
@@ -174,9 +175,8 @@ class _ConnectionIssuePageState extends ConsumerState<ConnectionIssuePage> {
         children: [
           ConduitButton(
             text: l10n.retry,
-            onPressed: _isLoggingOut
-                ? null
-                : () => context.go(Routes.serverConnection),
+            onPressed: (_isLoggingOut || _isRetrying) ? null : _retryConnection,
+            isLoading: _isRetrying,
             icon: Platform.isIOS
                 ? CupertinoIcons.refresh
                 : Icons.refresh_rounded,
@@ -185,7 +185,9 @@ class _ConnectionIssuePageState extends ConsumerState<ConnectionIssuePage> {
           const SizedBox(height: Spacing.sm),
           ConduitButton(
             text: l10n.signOut,
-            onPressed: _isLoggingOut ? null : () => _logout(l10n),
+            onPressed: (_isLoggingOut || _isRetrying)
+                ? null
+                : () => _logout(l10n),
             isLoading: _isLoggingOut,
             isSecondary: true,
             icon: Platform.isIOS
@@ -212,7 +214,53 @@ class _ConnectionIssuePageState extends ConsumerState<ConnectionIssuePage> {
     );
   }
 
+  Future<void> _retryConnection() async {
+    setState(() {
+      _isRetrying = true;
+      _statusMessage = null;
+    });
+
+    try {
+      // Clear the error state and attempt to re-establish connection
+      final authManager = ref.read(authStateManagerProvider.notifier);
+
+      // Reset retry counter for manual retry attempts
+      authManager.resetRetryCounter();
+
+      await authManager.silentLogin();
+
+      // If successful, router will automatically navigate to chat
+      if (!mounted) return;
+
+      // Small delay to show loading state
+      await Future.delayed(const Duration(milliseconds: 500));
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _statusMessage = 'Connection failed. Please try again.';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isRetrying = false;
+        });
+      }
+    }
+  }
+
   Future<void> _logout(AppLocalizations l10n) async {
+    // Show confirmation dialog before logging out
+    final confirm = await ThemedDialogs.confirm(
+      context,
+      title: l10n.signOut,
+      message: l10n.endYourSession,
+      confirmText: l10n.signOut,
+      isDestructive: true,
+    );
+
+    if (!mounted) return;
+    if (!confirm) return;
+
     setState(() {
       _isLoggingOut = true;
       _statusMessage = null;

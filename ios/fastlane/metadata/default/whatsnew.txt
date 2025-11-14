@@ -1,3 +1,0 @@
-• Added Korean language support and localization files
-• Keyboard automatically dismisses when scrolling
-• Implemented local cache persistence for conversations

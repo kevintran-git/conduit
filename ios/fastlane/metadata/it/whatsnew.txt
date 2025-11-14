@@ -1,3 +1,0 @@
-• Aggiunto supporto per la lingua coreana e file di localizzazione
-• La tastiera si chiude automaticamente durante lo scorrimento
-• Implementata persistenza della cache locale per le conversazioni

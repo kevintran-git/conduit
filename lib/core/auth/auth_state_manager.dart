@@ -79,6 +79,7 @@ enum AuthStatus {
   unauthenticated,
   tokenExpired,
   error,
+  credentialError, // Invalid credentials - need re-login
 }
 
 /// Unified auth state manager - single source of truth for all auth operations
@@ -86,6 +87,11 @@ enum AuthStatus {
 class AuthStateManager extends _$AuthStateManager {
   final AuthCacheManager _cacheManager = AuthCacheManager();
   Future<bool>? _silentLoginFuture;
+
+  // Prevent infinite retry loops
+  int _retryCount = 0;
+  static const int _maxRetries = 3;
+  DateTime? _lastRetryTime;
 
   AuthState get _current =>
       state.asData?.value ?? const AuthState(status: AuthStatus.initial);
@@ -496,13 +502,23 @@ class AuthStateManager extends _$AuthStateManager {
 
       String errorMessage = e.toString();
 
-      // Clear invalid credentials on auth errors
-      if (e.toString().contains('401') ||
-          e.toString().contains('403') ||
-          e.toString().contains('authentication') ||
-          e.toString().contains('unauthorized')) {
+      // Don't clear credentials on connection errors - only clear on actual auth failures
+      // Check if this is a genuine auth failure vs network issue
+      final isNetworkError =
+          e.toString().contains('SocketException') ||
+          e.toString().contains('Connection') ||
+          e.toString().contains('timeout') ||
+          e.toString().contains('NetworkImage');
+
+      if (!isNetworkError &&
+          (e.toString().contains('401') ||
+              e.toString().contains('403') ||
+              e.toString().contains('authentication') ||
+              e.toString().contains('unauthorized'))) {
+        // Only clear credentials if this is a real auth failure, not a network issue
         final storage = ref.read(optimizedStorageServiceProvider);
         try {
+          DebugLogger.auth('Clearing invalid credentials after auth failure');
           await storage.deleteSavedCredentials();
         } catch (deleteError, deleteStack) {
           DebugLogger.error(
@@ -516,76 +532,152 @@ class AuthStateManager extends _$AuthStateManager {
               'credentials; please clear Conduit credentials from '
               'system settings.';
         }
+
+        // Set credential error status to trigger login page
+        _update(
+          (current) => current.copyWith(
+            status: AuthStatus.credentialError,
+            error: errorMessage,
+            isLoading: false,
+            clearToken: true,
+          ),
+        );
+        return false;
+      } else if (isNetworkError) {
+        DebugLogger.auth(
+          'Silent login failed due to network error - keeping credentials',
+        );
+        errorMessage = 'Connection issue - please check your network';
+
+        // Set general error status to trigger connection issue page
+        _update(
+          (current) => current.copyWith(
+            status: AuthStatus.error,
+            error: errorMessage,
+            isLoading: false,
+          ),
+        );
+        return false;
       }
 
+      // Unknown error type - treat as connection issue but keep credentials
+      if (errorMessage.trim().isEmpty) {
+        errorMessage = 'Connection issue - please try again shortly';
+      }
+      DebugLogger.auth(
+        'Silent login failed with unknown error - keeping credentials',
+      );
       _update(
         (current) => current.copyWith(
-          status: AuthStatus.unauthenticated,
+          status: AuthStatus.error,
           error: errorMessage,
           isLoading: false,
-          clearToken: true,
         ),
       );
       return false;
     }
   }
 
-  /// Handle token invalidation (called by API service)
+  /// Reset retry counter (called when user manually retries)
+  void resetRetryCounter() {
+    _retryCount = 0;
+    _lastRetryTime = null;
+    DebugLogger.auth('Retry counter reset for manual retry');
+  }
+
+  /// Handle auth issues (called by API service)
+  /// This shows connection issue page instead of logging out
+  void onAuthIssue() {
+    DebugLogger.auth('Auth issue detected - showing connection issue page');
+    // Don't clear token or user data - just set error state
+    // The router will show connection issue page
+    _update(
+      (current) => current.copyWith(
+        status: AuthStatus.error,
+        error: 'Connection issue - please check your connection',
+        clearError: false,
+      ),
+    );
+  }
+
+  /// Handle token invalidation (called by API service for explicit token expiry)
+  /// This is only used when we need to clear the token for re-login attempts
   Future<void> onTokenInvalidated() async {
+    // Prevent infinite retry loops
+    final now = DateTime.now();
+    if (_lastRetryTime != null &&
+        now.difference(_lastRetryTime!).inSeconds < 5) {
+      _retryCount++;
+      if (_retryCount >= _maxRetries) {
+        DebugLogger.auth(
+          'Max retry attempts reached - stopping silent re-login',
+        );
+        _update(
+          (current) => current.copyWith(
+            status: AuthStatus.error,
+            error: 'Connection issue - please retry manually',
+            clearError: false,
+          ),
+        );
+        // Reset after 30 seconds to allow manual retry
+        Future.delayed(const Duration(seconds: 30), () {
+          _retryCount = 0;
+          _lastRetryTime = null;
+        });
+        return;
+      }
+    } else {
+      // Reset counter if enough time has passed
+      _retryCount = 0;
+    }
+    _lastRetryTime = now;
+
     // Avoid spamming logs if multiple requests invalidate at once
     final reloginInProgress = _silentLoginFuture != null;
     if (!reloginInProgress) {
-      DebugLogger.auth('Auth token invalidated');
+      DebugLogger.auth(
+        'Auth token invalidated - attempting silent re-login (attempt ${_retryCount + 1}/$_maxRetries)',
+      );
     }
 
-    // Clear token from storage
     final storage = ref.read(optimizedStorageServiceProvider);
     try {
       await storage.deleteAuthToken();
-      _updateApiServiceToken(null);
-    } catch (error, stack) {
+      DebugLogger.auth('Cleared invalidated token from secure storage');
+    } catch (e, stack) {
       DebugLogger.error(
         'token-delete-failed',
         scope: 'auth/state',
-        error: error,
+        error: e,
         stackTrace: stack,
       );
-      _updateApiServiceToken(null);
-      _update(
-        (current) => current.copyWith(
-          status: AuthStatus.error,
-          error:
-              'Failed to clear secure token. Please clear Conduit '
-              'credentials from your device keychain and sign in again.',
-          clearToken: true,
-          clearUser: true,
-          clearError: false,
-        ),
-      );
-      return;
     }
+    _updateApiServiceToken(null);
 
-    // Update state
     _update(
       (current) => current.copyWith(
         status: AuthStatus.tokenExpired,
+        error: 'Session expired - please sign in again',
         clearToken: true,
         clearUser: true,
-        clearError: true,
+        isLoading: false,
       ),
     );
 
     // Attempt silent re-login if credentials are available
     final hasCredentials = await storage.getSavedCredentials() != null;
-    if (hasCredentials) {
-      if (!reloginInProgress) {
-        DebugLogger.auth('Attempting silent re-login after token invalidation');
+    if (hasCredentials && !reloginInProgress) {
+      DebugLogger.auth('Attempting silent re-login after token invalidation');
+      final success = await silentLogin();
+      if (success) {
+        // Reset retry counter on success
+        _retryCount = 0;
+        _lastRetryTime = null;
       }
-      await silentLogin();
     }
   }
 
-  /// Logout user
+  /// Logout user and clear all data including server configs and custom headers
   Future<void> logout() async {
     _update(
       (current) =>
@@ -607,14 +699,20 @@ class AuthStateManager extends _$AuthStateManager {
         }
       }
 
-      // Clear all local auth data
+      // Clear all local auth data (including server configs with custom headers)
       final storage = ref.read(optimizedStorageServiceProvider);
       await storage.clearAuthData();
       _updateApiServiceToken(null);
 
       // Clear active server to force return to server connection page
       await storage.setActiveServerId(null);
+      
+      // Invalidate all auth-related providers to clear cached data
       ref.invalidate(activeServerProvider);
+      ref.invalidate(serverConfigsProvider);
+      
+      // Clear auth cache manager
+      _cacheManager.clearAuthCache();
 
       // Update state
       _update(
@@ -627,7 +725,7 @@ class AuthStateManager extends _$AuthStateManager {
         ),
       );
 
-      DebugLogger.auth('Logout complete');
+      DebugLogger.auth('Logout complete - all data cleared including server configs and custom headers');
     } catch (e, stack) {
       DebugLogger.error(
         'logout-failed',
@@ -637,8 +735,19 @@ class AuthStateManager extends _$AuthStateManager {
       );
       // Even if logout fails, clear local state where possible
       final storage = ref.read(optimizedStorageServiceProvider);
+      try {
+        await storage.clearAuthData();
+      } catch (clearError) {
+        DebugLogger.error(
+          'logout-clear-failed',
+          scope: 'auth/state',
+          error: clearError,
+        );
+      }
       await storage.setActiveServerId(null);
       ref.invalidate(activeServerProvider);
+      ref.invalidate(serverConfigsProvider);
+      _cacheManager.clearAuthCache();
 
       _update(
         (current) => current.copyWith(
@@ -647,8 +756,8 @@ class AuthStateManager extends _$AuthStateManager {
           clearToken: true,
           clearUser: true,
           error:
-              'Logout error: $e. Secure credentials may remain stored; '
-              'please clear them from your device keychain.',
+              'Logout error: $e. Some data may remain stored; '
+              'please clear app data from your device settings if needed.',
         ),
       );
       _updateApiServiceToken(null);

@@ -1,1 +1,1 @@
-Koreaanse taalondersteuning, verbeterde UX met automatische toetsenbordsluiting en persistente gesprekscache
+Verbeterde spraakinvoer met taalverwerking, oproepen en Base64-afbeeldingsvalidatie

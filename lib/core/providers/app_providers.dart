@@ -275,8 +275,14 @@ final apiServiceProvider = Provider<ApiService?>((ref) {
 
       // Keep callbacks in sync so interceptor can notify auth manager
       apiService.setAuthCallbacks(
-        onAuthTokenInvalid: () {},
+        onAuthTokenInvalid: () {
+          // Called when auth errors occur (401/403)
+          // Show connection issue page instead of logging out
+          final authManager = ref.read(authStateManagerProvider.notifier);
+          authManager.onAuthIssue();
+        },
         onTokenInvalidated: () async {
+          // Called for token expiry - attempt silent re-login
           final authManager = ref.read(authStateManagerProvider.notifier);
           await authManager.onTokenInvalidated();
         },
@@ -291,8 +297,9 @@ final apiServiceProvider = Provider<ApiService?>((ref) {
 
       // Keep legacy callback for backward compatibility during transition
       apiService.onAuthTokenInvalid = () {
-        // This will be removed once migration is complete
-        DebugLogger.auth('legacy-token-callback', scope: 'auth/api');
+        // Show connection issue page instead of logging out
+        final authManager = ref.read(authStateManagerProvider.notifier);
+        authManager.onAuthIssue();
       };
 
       return apiService;

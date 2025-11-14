@@ -1,3 +1,0 @@
-• Koreaanse taalondersteuning en lokalisatiebestanden toegevoegd
-• Toetsenbord sluit automatisch bij scrollen
-• Lokale cache-persistentie voor gesprekken geïmplementeerd

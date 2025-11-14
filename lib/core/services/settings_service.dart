@@ -161,7 +161,10 @@ class SettingsService {
           box.get(PreferenceKeys.voiceSttPreference) as String?,
         ),
         voiceSilenceDuration:
-            (box.get(_voiceSilenceDurationKey) as int? ?? 2000).clamp(300, 3000),
+            (box.get(_voiceSilenceDurationKey) as int? ?? 2000).clamp(
+              300,
+              3000,
+            ),
       ),
     );
   }

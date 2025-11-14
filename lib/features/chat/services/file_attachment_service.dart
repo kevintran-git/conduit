@@ -180,8 +180,21 @@ class FileAttachmentService {
     int? maxHeight,
   ) async {
     try {
-      // Decode base64 data
-      final data = imageDataUrl.split(',')[1];
+      // Decode base64 data - with validation
+      final parts = imageDataUrl.split(',');
+      if (parts.length < 2) {
+        DebugLogger.log(
+          'Invalid data URL format - missing comma separator',
+          scope: 'attachments/image',
+          data: {
+            'urlPrefix': imageDataUrl.length > 50
+                ? imageDataUrl.substring(0, 50)
+                : imageDataUrl,
+          },
+        );
+        return imageDataUrl; // Return original if format is invalid
+      }
+      final data = parts[1];
       final bytes = base64Decode(data);
 
       // Decode image

@@ -147,9 +147,7 @@ Future<Set<String>> _scanUsedLocalizationKeys(Set<String> baseKeys) async {
       }
       return false;
     } catch (e) {
-      stderr.writeln(
-        'warning: failed to search for key "$key": $e',
-      );
+      stderr.writeln('warning: failed to search for key "$key": $e');
       return false;
     }
   }

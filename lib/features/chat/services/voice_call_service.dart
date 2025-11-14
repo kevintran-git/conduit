@@ -14,6 +14,7 @@ import 'text_to_speech_service.dart';
 import '../../../core/services/settings_service.dart';
 import 'voice_input_service.dart';
 import 'voice_call_notification_service.dart';
+import '../../tools/providers/tools_providers.dart';
 
 part 'voice_call_service.g.dart';
 
@@ -293,8 +294,11 @@ class VoiceCallService {
       _updateState(VoiceCallState.processing);
       _accumulatedResponse = ''; // Reset response accumulator
 
-      // Send message using the existing chat infrastructure
-      sendMessageFromService(_ref, text, null);
+      // Get the user's selected tool IDs to pass to the API
+      final selectedToolIds = _ref.read(selectedToolIdsProvider);
+
+      // Send message using the existing chat infrastructure with tool IDs
+      sendMessageFromService(_ref, text, null, selectedToolIds);
     } catch (e) {
       _updateState(VoiceCallState.error);
       rethrow;

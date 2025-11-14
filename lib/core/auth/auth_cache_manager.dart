@@ -100,11 +100,11 @@ class AuthCacheManager {
     DebugLogger.storage('Cache entry cleared: $key');
   }
 
-  /// Clear all auth-related cache
+  /// Clear all auth-related cache including server configs
   void clearAuthCache() {
     _cache.clear();
     _cacheTimestamps.clear();
-    DebugLogger.storage('All auth cache cleared');
+    DebugLogger.storage('All auth cache cleared (including server configs and custom headers)');
   }
 
   /// Clear expired cache entries

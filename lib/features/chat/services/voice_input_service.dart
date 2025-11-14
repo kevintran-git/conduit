@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:record/record.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:stts/stts.dart';
 import 'package:vad/vad.dart';
@@ -25,9 +26,11 @@ class LocaleName {
 class VoiceInputService {
   static const int _vadSampleRate = 16000;
   static const int _vadFrameSamples = 1536;
+  static const Duration _localeFetchTimeout = Duration(seconds: 2);
 
   final VadHandler _vadHandler = VadHandler.create();
   final Stt _speech = Stt();
+  final AudioRecorder _microphonePermissionProbe = AudioRecorder();
   final ApiService? _api;
   final Ref? _ref;
   bool _isInitialized = false;
@@ -37,6 +40,7 @@ class VoiceInputService {
   bool _usingServerStt = false;
   String? _selectedLocaleId;
   List<LocaleName> _locales = const [];
+  bool _usingFallbackLocales = false;
   StreamController<String>? _textStreamController;
   String _currentText = '';
   StreamController<int>? _intensityController;
@@ -77,31 +81,9 @@ class VoiceInputService {
       // Check permission and supported status
       _localSttAvailable = await _speech.isSupported();
       if (_localSttAvailable) {
-        try {
-          final langs = await _speech.getLanguages();
-          _locales = langs.map((l) => LocaleName(l, l)).toList();
-          final deviceTag = WidgetsBinding.instance.platformDispatcher.locale
-              .toLanguageTag();
-          final match = _locales.firstWhere(
-            (l) => l.localeId.toLowerCase() == deviceTag.toLowerCase(),
-            orElse: () {
-              final primary = deviceTag
-                  .split(RegExp('[-_]'))
-                  .first
-                  .toLowerCase();
-              return _locales.firstWhere(
-                (l) => l.localeId.toLowerCase().startsWith('$primary-'),
-                orElse: () => _locales.isNotEmpty
-                    ? _locales.first
-                    : LocaleName('en_US', 'en_US'),
-              );
-            },
-          );
-          _selectedLocaleId = match.localeId;
-        } catch (e) {
-          // ignore locale load errors
-          _selectedLocaleId = null;
-        }
+        final deviceTag = WidgetsBinding.instance.platformDispatcher.locale
+            .toLanguageTag();
+        await _loadLocales(deviceTag);
       }
     } catch (_) {
       _localSttAvailable = false;
@@ -111,17 +93,34 @@ class VoiceInputService {
   }
 
   Future<bool> checkPermissions() async {
-    try {
-      return await _speech.hasPermission();
-    } catch (_) {
+    final micGranted = await _ensureMicrophonePermission();
+    if (!micGranted) {
       return false;
     }
+    if (_localSttAvailable && _preference != SttPreference.serverOnly) {
+      try {
+        final sttGranted = await _speech.hasPermission();
+        if (!sttGranted) {
+          if (prefersDeviceOnly) {
+            return false;
+          }
+          _localSttAvailable = false;
+        }
+      } catch (_) {
+        if (prefersDeviceOnly) {
+          return false;
+        }
+        _localSttAvailable = false;
+      }
+    }
+    return true;
   }
 
   bool get isListening => _isListening;
   bool get isAvailable =>
       _isInitialized && (_localSttAvailable || hasServerStt);
   bool get hasLocalStt => _localSttAvailable;
+  bool get localeMetadataIncomplete => _usingFallbackLocales;
 
   // Add a method to check if on-device STT is properly supported
   Future<bool> checkOnDeviceSupport() async {
@@ -181,6 +180,89 @@ class VoiceInputService {
 
   void setLocale(String? localeId) {
     _selectedLocaleId = localeId;
+  }
+
+  Future<void> _loadLocales(String deviceTag) async {
+    _ensureFallbackLocale(deviceTag);
+    List<String> langs = const [];
+    try {
+      langs = await _speech.getLanguages().timeout(
+        _localeFetchTimeout,
+        onTimeout: () => const [],
+      );
+    } catch (_) {
+      // Engines such as Whisper Voice may not support this call.
+      langs = const [];
+    }
+    if (langs.isEmpty) {
+      return;
+    }
+    _locales = langs.map((locale) => LocaleName(locale, locale)).toList();
+    _usingFallbackLocales = false;
+    final match = _matchLocale(deviceTag);
+    _selectedLocaleId = match.localeId;
+  }
+
+  void _ensureFallbackLocale(String deviceTag) {
+    if (_locales.isNotEmpty && _selectedLocaleId != null) {
+      return;
+    }
+    _usingFallbackLocales = true;
+    if (deviceTag.isEmpty) {
+      _locales = const [LocaleName('en_US', 'en_US')];
+      _selectedLocaleId = 'en_US';
+      return;
+    }
+    _locales = [LocaleName(deviceTag, deviceTag)];
+    _selectedLocaleId = deviceTag;
+  }
+
+  LocaleName _matchLocale(String deviceTag) {
+    if (_locales.isEmpty) {
+      return const LocaleName('en_US', 'en_US');
+    }
+    final normalizedDevice = deviceTag.toLowerCase();
+    for (final locale in _locales) {
+      if (locale.localeId.toLowerCase() == normalizedDevice) {
+        return locale;
+      }
+    }
+    final parts = normalizedDevice.split(RegExp('[-_]'));
+    final primary = parts.isNotEmpty ? parts.first : normalizedDevice;
+    for (final locale in _locales) {
+      if (locale.localeId.toLowerCase().startsWith('$primary-')) {
+        return locale;
+      }
+    }
+    return _locales.first;
+  }
+
+  void _handleLocalRecognizerError(Object? error) {
+    if (!_isListening) {
+      return;
+    }
+    _localSttAvailable = false;
+    final message = error?.toString().trim();
+    final exception = Exception(
+      (message == null || message.isEmpty)
+          ? 'Speech recognition failed'
+          : message,
+    );
+    if (hasServerStt && allowsServerFallback) {
+      _textStreamController?.addError(exception);
+      unawaited(_beginServerFallback());
+      return;
+    }
+    _textStreamController?.addError(exception);
+    unawaited(_stopListening());
+  }
+
+  Future<bool> _ensureMicrophonePermission() async {
+    try {
+      return await _microphonePermissionProbe.hasPermission();
+    } catch (_) {
+      return false;
+    }
   }
 
   Stream<String> startListening() {
@@ -247,9 +329,12 @@ class VoiceInputService {
         if (result.isFinal) {
           unawaited(_stopListening());
         }
-      }, onError: (_) {});
+      }, onError: _handleLocalRecognizerError);
 
-      _sttStateSub = _speech.onStateChanged.listen((_) {}, onError: (_) {});
+      _sttStateSub = _speech.onStateChanged.listen(
+        (_) {},
+        onError: _handleLocalRecognizerError,
+      );
 
       Future(() async {
         try {
@@ -709,6 +794,7 @@ class VoiceInputService {
   void dispose() {
     stopListening();
     unawaited(_vadHandler.dispose());
+    unawaited(_microphonePermissionProbe.dispose());
     try {
       _speech.dispose().catchError((_) {});
     } catch (_) {}

@@ -142,6 +142,7 @@ final authNavigationStateProvider = Provider<AuthNavigationState>((ref) {
           return AuthNavigationState.authenticated;
         case AuthStatus.unauthenticated:
         case AuthStatus.tokenExpired:
+        case AuthStatus.credentialError:
           return AuthNavigationState.needsLogin;
         case AuthStatus.error:
           return AuthNavigationState.error;

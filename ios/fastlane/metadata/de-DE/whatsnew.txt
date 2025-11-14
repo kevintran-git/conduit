@@ -1,3 +1,0 @@
-• Koreanische Sprachunterstützung und Lokalisierungsdateien hinzugefügt
-• Tastatur schließt sich automatisch beim Scrollen
-• Lokale Cache-Persistenz für Unterhaltungen implementiert

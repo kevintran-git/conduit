@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../auth/auth_state_manager.dart';
 import '../providers/app_providers.dart';
 import '../services/connectivity_service.dart';
 import '../services/navigation_service.dart';
@@ -129,8 +130,20 @@ class RouterNotifier extends ChangeNotifier {
         if (location == Routes.connectionIssue) return null;
         return null;
       case AuthNavigationState.error:
-        if (location == Routes.connectionIssue) return null;
-        return null;
+        final authSnapshot = ref
+            .read(authStateManagerProvider)
+            .maybeWhen(data: (state) => state, orElse: () => null);
+        final hasValidToken = authSnapshot?.hasValidToken ?? false;
+        final isAuthFormRoute =
+            location == Routes.login || location == Routes.authentication;
+        if (!hasValidToken && isAuthFormRoute) {
+          // Keep user on the login/authentication flow to show inline errors
+          return null;
+        }
+        // Otherwise show connection issue page for recoverable auth errors
+        return location == Routes.connectionIssue
+            ? null
+            : Routes.connectionIssue;
       case AuthNavigationState.authenticated:
         // Avoid unnecessary redirects if already on a non-auth route
         if (_isAuthLocation(location) ||

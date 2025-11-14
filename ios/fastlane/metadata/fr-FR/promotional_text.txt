@@ -1,1 +1,1 @@
-Support du coréen, UX améliorée avec fermeture automatique du clavier et cache persistant des conversations
+Saisie vocale améliorée avec gestion des langues, appels vocaux et validation d'images Base64

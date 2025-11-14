@@ -1,1 +1,1 @@
-Korean language support, improved UX with keyboard dismiss, and persistent conversation cache
+Improved voice input with locale handling, voice calls, and Base64 image validation

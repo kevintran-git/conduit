@@ -698,7 +698,8 @@ class AppCustomizationPage extends ConsumerWidget {
                         children: [
                           Text(
                             l10n.sttSilenceDuration,
-                            style: theme.bodyMedium?.copyWith(
+                            style:
+                                theme.bodyMedium?.copyWith(
                                   color: theme.sidebarForeground,
                                   fontWeight: FontWeight.w600,
                                 ) ??
@@ -711,13 +712,16 @@ class AppCustomizationPage extends ConsumerWidget {
                           const SizedBox(height: Spacing.xs),
                           Text(
                             '${settings.voiceSilenceDuration}ms',
-                            style: theme.bodySmall?.copyWith(
-                                  color: theme.sidebarForeground
-                                      .withValues(alpha: 0.7),
+                            style:
+                                theme.bodySmall?.copyWith(
+                                  color: theme.sidebarForeground.withValues(
+                                    alpha: 0.7,
+                                  ),
                                 ) ??
                                 TextStyle(
-                                  color: theme.sidebarForeground
-                                      .withValues(alpha: 0.7),
+                                  color: theme.sidebarForeground.withValues(
+                                    alpha: 0.7,
+                                  ),
                                   fontSize: 12,
                                 ),
                           ),
@@ -726,7 +730,8 @@ class AppCustomizationPage extends ConsumerWidget {
                     ),
                     Text(
                       '${(settings.voiceSilenceDuration / 1000).toStringAsFixed(1)}s',
-                      style: theme.bodyMedium?.copyWith(
+                      style:
+                          theme.bodyMedium?.copyWith(
                             color: theme.buttonPrimary,
                             fontWeight: FontWeight.w600,
                           ) ??
@@ -752,7 +757,8 @@ class AppCustomizationPage extends ConsumerWidget {
                 ),
                 Text(
                   l10n.sttSilenceDurationDescription,
-                  style: theme.bodySmall?.copyWith(
+                  style:
+                      theme.bodySmall?.copyWith(
                         color: theme.sidebarForeground.withValues(alpha: 0.7),
                       ) ??
                       TextStyle(
@@ -1669,7 +1675,7 @@ class AppCustomizationPage extends ConsumerWidget {
         return AppLocalizations.of(context)!.russian;
       case 'zh':
         return AppLocalizations.of(context)!.chinese;
-      case 'kr':
+      case 'ko':
         return AppLocalizations.of(context)!.korean;
       default:
         return AppLocalizations.of(context)!.system;
@@ -1905,8 +1911,8 @@ class AppCustomizationPage extends ConsumerWidget {
               ),
               ListTile(
                 title: Text(AppLocalizations.of(context)!.korean),
-                trailing: current == 'kr' ? const Icon(Icons.check) : null,
-                onTap: () => Navigator.pop(context, 'kr'),
+                trailing: current == 'ko' ? const Icon(Icons.check) : null,
+                onTap: () => Navigator.pop(context, 'ko'),
               ),
               const SizedBox(height: Spacing.sm),
             ],

@@ -1170,9 +1170,7 @@ class ApiService {
         data,
         debugLabel: 'parse_file_search',
       );
-      return normalized
-          .map(FileInfo.fromJson)
-          .toList(growable: false);
+      return normalized.map(FileInfo.fromJson).toList(growable: false);
     }
     return const [];
   }
@@ -1186,9 +1184,7 @@ class ApiService {
         data,
         debugLabel: 'parse_file_all',
       );
-      return normalized
-          .map(FileInfo.fromJson)
-          .toList(growable: false);
+      return normalized.map(FileInfo.fromJson).toList(growable: false);
     }
     return const [];
   }
@@ -1599,10 +1595,7 @@ class ApiService {
     if (data is Map<String, dynamic>) {
       final voices = data['voices'];
       if (voices is List) {
-        return _normalizeList(
-          voices,
-          debugLabel: 'parse_voice_list',
-        );
+        return _normalizeList(voices, debugLabel: 'parse_voice_list');
       }
     }
     if (data is List) {
@@ -1795,10 +1788,7 @@ class ApiService {
     final response = await _dio.get('/api/v1/images/models');
     final data = response.data;
     if (data is List) {
-      return _normalizeList(
-        data,
-        debugLabel: 'parse_image_models',
-      );
+      return _normalizeList(data, debugLabel: 'parse_image_models');
     }
     return [];
   }
@@ -3213,10 +3203,7 @@ class ApiService {
 
       final data = response.data;
       if (data is List) {
-        return _normalizeList(
-          data,
-          debugLabel: 'parse_message_search',
-        );
+        return _normalizeList(data, debugLabel: 'parse_message_search');
       }
       if (data is Map<String, dynamic>) {
         final list = (data['items'] ?? data['results'] ?? data['messages']);

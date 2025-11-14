@@ -1,1 +1,1 @@
-Koreanische Sprachunterstützung, verbesserte UX mit automatischer Tastatur-Schließung und persistenter Gesprächs-Cache
+Verbesserter Spracheingang mit Sprachverarbeitung, Sprachanrufen und Base64-Bildvalidierung

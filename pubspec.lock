@@ -1166,7 +1166,7 @@ packages:
     source: hosted
     version: "1.5.0"
   record:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: record
       sha256: "6bad72fb3ea6708d724cf8b6c97c4e236cf9f43a52259b654efeb6fd9b737f1f"

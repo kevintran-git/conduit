@@ -280,11 +280,12 @@ class SecureCredentialStorage {
     }
   }
 
-  /// Clear all secure data
+  /// Clear all secure data including credentials, tokens, and server configurations
+  /// (which contain custom headers)
   Future<void> clearAll() async {
     try {
       await _secureStorage.deleteAll();
-      DebugLogger.storage('clear-ok', scope: 'credentials');
+      DebugLogger.storage('clear-ok (all secure data including server configs with custom headers)', scope: 'credentials');
     } catch (e) {
       DebugLogger.error('clear-failed', scope: 'credentials', error: e);
     }

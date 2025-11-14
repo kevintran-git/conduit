@@ -61,7 +61,7 @@ jobs:
 
         #4 Install Dependencies
       - name: Install Dependencies
-        run: flutter pub get --enforce-lockfile
+        run: flutter pub get
 
       - name: Generate code (build_runner)
         run: dart run build_runner build --delete-conflicting-outputs
@@ -128,7 +128,7 @@ jobs:
 
         #3 Install Dependencies
       - name: Install Dependencies
-        run: flutter pub get --enforce-lockfile
+        run: flutter pub get
 
       - name: Generate code (build_runner)
         run: dart run build_runner build --delete-conflicting-outputs
