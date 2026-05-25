@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../../../core/models/chat_message.dart';
 import '../../../core/services/settings_service.dart';
@@ -60,6 +61,7 @@ class CallSession extends Notifier<CallSessionState> {
   @override
   CallSessionState build() {
     ref.onDispose(_teardown);
+    unawaited(WakelockPlus.enable());
     ref.read(gatewayInferenceRouterProvider).markCallStart();
     ref.listen<List<ChatMessage>>(
       chat.chatMessagesProvider,
@@ -497,6 +499,7 @@ class CallSession extends Notifier<CallSessionState> {
   Future<void> _teardown() async {
     _alive = false;
     _interrupt();
+    unawaited(WakelockPlus.disable());
     ref.read(gatewayInferenceRouterProvider).markCallEnd();
     // Detach references synchronously so the loop and overlay can't observe
     // stale state. Then fire-and-forget the underlying disposals — the STT
