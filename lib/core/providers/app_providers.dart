@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../services/api_service.dart';
+import '../../inference_gateway/router/gateway_router_providers.dart';
 import '../auth/auth_state_manager.dart';
 import '../../features/auth/providers/unified_auth_providers.dart';
 import '../services/attachment_upload_queue.dart';
@@ -348,6 +349,10 @@ final apiServiceProvider = Provider<ApiService?>((ref) {
         final authManager = ref.read(authStateManagerProvider.notifier);
         authManager.onAuthIssue();
       };
+
+      apiService.attachGatewayRouter(
+        ref.read(gatewayInferenceRouterProvider),
+      );
 
       return apiService;
     },

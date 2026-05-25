@@ -100,7 +100,12 @@ Stream<OpenWebUIStreamUpdate> parseOpenWebUIStream(
   Stream<List<int>> chunks,
 ) async* {
   final scanner = _OpenWebUISseScanner();
-  final textChunks = chunks.transform(utf8.decoder);
+  // Dio hands us `Stream<Uint8List>` for streamed responses, but
+  // `utf8.decoder` is a `Converter<List<int>, String>` whose
+  // `StreamTransformer` is typed for `List<int>` — passing `Uint8List` chunks
+  // directly throws a TypeError on the first frame and silently kills the
+  // stream. `.cast<List<int>>()` widens the element type without a copy.
+  final textChunks = chunks.cast<List<int>>().transform(utf8.decoder);
 
   await for (final chunk in textChunks) {
     for (final data in scanner.addChunk(chunk)) {
@@ -296,6 +301,12 @@ const int _lineFeed = 0x0A;
 const int _carriageReturn = 0x0D;
 
 OpenWebUIEventUpdate? _eventUpdateFromMap(Map<dynamic, dynamic> raw) {
+  // OpenAI-compatible chunks always carry `choices`. Some proxies attach a
+  // debug `type` field to them; without this guard those chunks get hijacked
+  // into generic events and their `delta.content` is dropped. Caller falls
+  // through to the `parsed['choices']` path so content still streams.
+  if (raw['choices'] is List) return null;
+
   final type = raw['type']?.toString();
   if (type == null || type.isEmpty || type.startsWith('response.')) {
     return null;

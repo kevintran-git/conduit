@@ -363,6 +363,18 @@ class ProfilePage extends ConsumerWidget {
           context.pushNamed(RouteNames.appCustomization);
         },
       ),
+      _buildAccountOption(
+        context,
+        icon: UiUtils.platformIcon(
+          ios: CupertinoIcons.bolt_horizontal_circle,
+          android: Icons.bolt,
+        ),
+        title: 'Inference Gateway',
+        subtitle: 'Route STT, chat, and TTS to your own endpoint',
+        onTap: () {
+          context.pushNamed(RouteNames.gatewaySettings);
+        },
+      ),
       _buildAboutTile(context),
       _buildAccountOption(
         context,
