@@ -29,9 +29,11 @@ import '../utils/embed_utils.dart';
 import '../utils/json_normalization.dart';
 import '../utils/message_tree_utils.dart' as message_tree;
 import 'conversation_parsing.dart';
+import 'openwebui_stream_parser.dart';
 import 'settings_service.dart';
 import 'worker_manager.dart';
 import 'server_tls_http_client_factory.dart';
+import '../../inference_gateway/router/gateway_inference_router.dart';
 
 const bool _traceApiLogs = false;
 const int _conversationWorkerByteThreshold = 50 * 1024;
@@ -250,6 +252,7 @@ class ApiService {
   final WorkerManager _workerManager;
   late final ApiAuthInterceptor _authInterceptor;
   _ChatRequestMetadataFormat? _chatRequestMetadataFormat;
+  GatewayInferenceRouter? _gatewayRouter;
   // Public getter for dio instance
   Dio get dio => _dio;
 
@@ -350,6 +353,10 @@ class ApiService {
 
   void updateAuthToken(String? token) {
     _authInterceptor.updateAuthToken(token);
+  }
+
+  void attachGatewayRouter(GatewayInferenceRouter? router) {
+    _gatewayRouter = router;
   }
 
   String? get authToken => _authInterceptor.authToken;
@@ -831,6 +838,20 @@ class ApiService {
 
   // Models
   Future<List<Model>> getModels({bool includeHidden = false}) async {
+    final router = _gatewayRouter;
+    if (router != null && router.isChatActive) {
+      try {
+        return await router.listChatModels();
+      } catch (error, stackTrace) {
+        DebugLogger.error(
+          'gateway-models-failed-falling-back',
+          scope: 'api/models',
+          error: error,
+          stackTrace: stackTrace,
+        );
+      }
+    }
+
     final response = await _dio.get('/api/models');
 
     // Normalize common response formats:
@@ -3156,6 +3177,12 @@ class ApiService {
     String? sessionId,
     List<String>? filterIds,
   }) async {
+    // Gateway-routed turns don't have an OWUI completed endpoint; skip.
+    final router = _gatewayRouter;
+    if (router != null && router.isChatActive) {
+      return null;
+    }
+
     // Format messages to match OpenWebUI expected structure exactly
     final formattedMessages = messages.map((msg) {
       final formatted = <String, dynamic>{
@@ -3343,6 +3370,16 @@ class ApiService {
     String? mimeType,
     String? language,
   }) async {
+    final router = _gatewayRouter;
+    if (router != null && router.isSttActive) {
+      return router.transcribeSpeech(
+        audioBytes: audioBytes,
+        fileName: fileName,
+        mimeType: mimeType,
+        language: language,
+      );
+    }
+
     if (audioBytes.isEmpty) {
       throw ArgumentError('audioBytes cannot be empty for transcription');
     }
@@ -3391,6 +3428,11 @@ class ApiService {
     String? voice,
     double? speed,
   }) async {
+    final router = _gatewayRouter;
+    if (router != null && router.isTtsActive) {
+      return router.generateSpeech(text: text, voice: voice, speed: speed);
+    }
+
     final textPreview = text.length > 50 ? text.substring(0, 50) : text;
     _traceApi('Generating speech for text: $textPreview...');
     final response = await _dio.post(
@@ -4680,6 +4722,21 @@ class ApiService {
     Map<String, dynamic>? variables,
     List<Map<String, dynamic>>? files,
   }) async {
+    final router = _gatewayRouter;
+    if (router != null && router.isChatActive) {
+      final session = await router.sendChatSession(
+        messages: messages,
+        model: model,
+        conversationId: conversationId,
+        responseMessageId: responseMessageId,
+      );
+      final abort = session.abort;
+      if (abort != null) {
+        _streamCancelActions[session.messageId] = abort;
+      }
+      return session;
+    }
+
     // Generate unique IDs
     final messageId =
         (responseMessageId != null && responseMessageId.isNotEmpty)
@@ -4768,8 +4825,11 @@ class ApiService {
         data: data,
         options: Options(
           responseType: ResponseType.stream,
-          // Accept all non-5xx so we can inspect error bodies ourselves.
           validateStatus: (status) => status != null && status < 600,
+          // SSE pauses between tokens (reasoning models, long tool calls)
+          // are normal — Dio's default 30s receive timeout breaks them.
+          sendTimeout: Duration.zero,
+          receiveTimeout: Duration.zero,
         ),
         cancelToken: cancelToken,
       );
@@ -5768,20 +5828,12 @@ $content
 </content>''';
 
     try {
-      final response = await _dio.post(
-        '/api/chat/completions',
-        data: {
-          'model': modelId,
-          'stream': false,
-          'messages': [
-            {'role': 'user', 'content': prompt},
-          ],
-        },
+      final responseText = await _completeNonStreaming(
+        model: modelId,
+        messages: [
+          {'role': 'user', 'content': prompt},
+        ],
       );
-
-      final responseText =
-          response.data?['choices']?[0]?['message']?['content'] as String? ??
-          '';
 
       _traceApi('Title generation response: $responseText');
 
@@ -5816,23 +5868,72 @@ $content
 Provide the enhanced notes in markdown format. Use markdown syntax for headings, lists, task lists ([ ]) where tasks or checklists are strongly implied, and emphasis to improve clarity and presentation. Ensure that all integrated content is accurately reflected. Return only the markdown formatted note.''';
 
     try {
-      final response = await _dio.post(
-        '/api/chat/completions',
-        data: {
-          'model': modelId,
-          'stream': false,
-          'messages': [
-            {'role': 'system', 'content': systemPrompt},
-            {'role': 'user', 'content': '<notes>$content</notes>'},
-          ],
-        },
+      return await _completeNonStreaming(
+        model: modelId,
+        messages: [
+          {'role': 'system', 'content': systemPrompt},
+          {'role': 'user', 'content': '<notes>$content</notes>'},
+        ],
       );
-
-      return response.data?['choices']?[0]?['message']?['content'] as String?;
     } catch (e) {
       _traceApi('Failed to enhance note content: $e');
       rethrow;
     }
+  }
+
+  /// Non-streaming chat completion helper. Routes to the gateway when the
+  /// chat shim is active (so notes title/enhance also bypass OWUI), falls
+  /// back to OWUI's `/api/chat/completions` otherwise. Always returns the
+  /// raw assistant text (may be empty).
+  Future<String> _completeNonStreaming({
+    required String model,
+    required List<Map<String, dynamic>> messages,
+  }) async {
+    final router = _gatewayRouter;
+    if (router != null && router.isChatActive) {
+      final session = await router.sendChatSession(
+        messages: messages,
+        model: model,
+      );
+      final stream = session.byteStream;
+      if (stream == null) return '';
+      final buffer = StringBuffer();
+      // parseOpenWebUIStream buffers across chunks and handles UTF-8 split
+      // characters — bypassing it (as the previous inline split did) drops
+      // tokens at every chunk boundary. The 90s budget protects callers
+      // from a gateway that accepts the handshake but then hangs upstream.
+      final updates = parseOpenWebUIStream(stream)
+          .timeout(const Duration(seconds: 90));
+      try {
+        await for (final update in updates) {
+          if (update is OpenWebUIContentDelta) buffer.write(update.content);
+        }
+      } on TimeoutException catch (error, stackTrace) {
+        try {
+          session.abort?.call();
+        } catch (_) {}
+        DebugLogger.error(
+          'non-streaming-timeout',
+          scope: 'api/gateway-shim',
+          error: error,
+          stackTrace: stackTrace,
+        );
+        rethrow;
+      }
+      return buffer.toString();
+    }
+
+    final response = await _dio.post(
+      '/api/chat/completions',
+      data: {
+        'model': model,
+        'stream': false,
+        'messages': messages,
+      },
+    );
+    final text =
+        response.data?['choices']?[0]?['message']?['content'] as String?;
+    return text ?? '';
   }
 
   // ==================== END NOTES ====================

@@ -33,6 +33,7 @@ import '../../features/profile/views/app_customization_page.dart';
 import '../../features/profile/views/audio_settings_page.dart';
 import '../../features/profile/views/personalization_page.dart';
 import '../../features/profile/views/profile_page.dart';
+import '../../inference_gateway/settings/gateway_settings_page.dart';
 import '../../l10n/app_localizations.dart';
 import '../models/server_config.dart';
 
@@ -382,6 +383,12 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       name: RouteNames.appCustomization,
       pageBuilder: (context, state) =>
           _buildPlatformPage(state: state, child: const AppCustomizationPage()),
+    ),
+    GoRoute(
+      path: Routes.gatewaySettings,
+      name: RouteNames.gatewaySettings,
+      pageBuilder: (context, state) =>
+          _buildPlatformPage(state: state, child: const GatewaySettingsPage()),
     ),
     GoRoute(
       path: Routes.about,

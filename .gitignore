@@ -87,6 +87,9 @@ coverage/
 # Temporary files
 *.tmp
 *.temp
+
+# Personal probe/debug scripts
+tool/probe_*.dart
 *.bak
 *.orig
 
@@ -149,4 +152,4 @@ GoogleService-Info.plist
 !**/ios/**/default.pbxuser
 !**/ios/**/default.perspectivev3
 !/packages/flutter_tools/test/data/dart_dependencies_test/**/.packages
-sync
+/sync

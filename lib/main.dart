@@ -30,6 +30,10 @@ import 'core/models/tool.dart';
 import 'package:conduit/l10n/app_localizations.dart';
 import 'core/services/quick_actions_service.dart';
 import 'core/providers/app_startup_providers.dart';
+import 'shared/theme/tweakcn_themes.dart';
+import 'features/chat/voice_call/presentation/voice_call_launcher.dart';
+import 'inference_gateway/chat_tts/gateway_text_to_speech_service.dart';
+import 'inference_gateway/voice_call/presentation/gateway_call_launcher.dart';
 
 const bool _enableFlutterDriverExtension = bool.fromEnvironment(
   'ENABLE_FLUTTER_DRIVER_EXTENSION',
@@ -176,6 +180,12 @@ void main() {
         overrides: [
           secureStorageProvider.overrideWithValue(secureStorage),
           hiveBoxesProvider.overrideWithValue(hiveBoxes),
+          voiceCallLauncherProvider.overrideWith(
+            (ref) => GatewayCallLauncher(ref),
+          ),
+          textToSpeechServiceProvider.overrideWith(
+            createGatewayTextToSpeechService,
+          ),
         ],
       );
       // CarPlay can cold-launch Conduit without a visible Flutter scene, so
