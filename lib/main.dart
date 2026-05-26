@@ -36,6 +36,7 @@ import 'core/providers/app_providers.dart' show apiServiceProvider;
 import 'inference_gateway/api/gateway_api_provider.dart';
 import 'inference_gateway/chat_tts/gateway_text_to_speech_service.dart';
 import 'inference_gateway/voice_call/presentation/gateway_call_launcher.dart';
+import 'inference_gateway/widgets/gateway_connectivity_overlay.dart';
 
 const bool _enableFlutterDriverExtension = bool.fromEnvironment(
   'ENABLE_FLUTTER_DRIVER_EXTENSION',
@@ -675,7 +676,9 @@ class _ConduitAppState extends ConsumerState<ConduitApp> {
 
           return Theme(
             data: materialTheme,
-            child: _KeyboardDismissOnScroll(child: safeChild),
+            child: _KeyboardDismissOnScroll(
+              child: GatewayConnectivityOverlay(child: safeChild),
+            ),
           );
         },
       ),

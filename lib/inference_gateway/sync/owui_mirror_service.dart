@@ -66,6 +66,10 @@ class OwuiMirrorService {
     _wired = false;
   }
 
+  /// Count of conversations with a pending OWUI push. Read by the UI so it
+  /// can tell the user how much sync work is queued while OWUI is unreachable.
+  int get pendingCount => _outbox.pending().length;
+
   /// True when [conversationId] has a pending push not yet mirrored to OWUI.
   /// Chat-merge logic uses this to decide whether a fresh server snapshot is
   /// authoritative (no pending → trust the server, including deletions) or
