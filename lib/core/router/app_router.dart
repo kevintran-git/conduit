@@ -385,8 +385,8 @@ final goRouterProvider = Provider<GoRouter>((ref) {
           _buildPlatformPage(state: state, child: const AppCustomizationPage()),
     ),
     GoRoute(
-      path: Routes.gatewaySettings,
-      name: RouteNames.gatewaySettings,
+      path: '/profile/gateway',
+      name: 'gateway-settings',
       pageBuilder: (context, state) =>
           _buildPlatformPage(state: state, child: const GatewaySettingsPage()),
     ),

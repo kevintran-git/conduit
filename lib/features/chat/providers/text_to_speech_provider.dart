@@ -1,14 +1,12 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../../../core/models/backend_config.dart';
 import '../../../core/services/settings_service.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../../shared/widgets/markdown/markdown_preprocessor.dart';
 import '../services/text_to_speech_service.dart';
-import '../voice_call/application/voice_call_controller.dart';
 
 enum TtsPlaybackStatus { idle, initializing, loading, speaking, paused, error }
 
@@ -120,21 +118,6 @@ class TextToSpeechController extends Notifier<TextToSpeechState> {
         );
       }
     }, fireImmediately: false);
-
-    // Keep screen awake while speaking; release only when call isn't also active.
-    listenSelf((previous, next) {
-      final wasSpeaking = previous?.isSpeaking ?? false;
-      final nowSpeaking = next.isSpeaking;
-      if (wasSpeaking == nowSpeaking) return;
-      if (nowSpeaking) {
-        unawaited(WakelockPlus.enable());
-      } else {
-        final callActive = ref.read(voiceCallControllerProvider).isActive;
-        if (!callActive) {
-          unawaited(WakelockPlus.disable());
-        }
-      }
-    });
 
     return const TextToSpeechState();
   }

@@ -7,7 +7,7 @@ import '../../core/providers/app_providers.dart';
 import '../../core/services/api_service.dart';
 import '../../core/services/connectivity_service.dart';
 import '../../core/utils/debug_logger.dart';
-import '../../features/chat/services/conversation_message_cache.dart';
+import '../cache/conversation_message_cache.dart';
 import 'owui_mirror_outbox.dart';
 
 /// Pushes locally-completed gateway turns to OWUI so other devices stay in

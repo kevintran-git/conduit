@@ -26,13 +26,13 @@ import '../../../core/utils/message_tree_utils.dart' as message_tree;
 import '../../../core/utils/tool_calls_parser.dart';
 import '../models/chat_context_attachment.dart';
 import '../providers/context_attachments_provider.dart';
-import '../services/conversation_message_cache.dart';
 import '../../../shared/services/tasks/task_queue.dart';
 import '../../tools/providers/tools_providers.dart';
 import '../services/chat_transport_dispatch.dart';
 import '../services/reviewer_mode_service.dart';
-import '../../../inference_gateway/config/gateway_providers.dart';
-import '../../../inference_gateway/sync/owui_mirror_providers.dart';
+import '../../../inference_gateway/config/gateway_providers.dart'
+    show gatewayChatActiveProvider;
+import '../../../inference_gateway/sync/gateway_chat_hooks.dart';
 
 part 'chat_providers.g.dart';
 
@@ -445,7 +445,7 @@ class ChatMessagesNotifier extends Notifier<List<ChatMessage>> {
         _stopRemoteTaskMonitor();
 
         if (next != null) {
-          state = _seedMessagesForConversation(next);
+          state = gatewaySeedMessagesForConversation(ref, next) ?? next.messages;
           _syncStreamingProfileWithState();
 
           // Update selected model if conversation has a different model
@@ -490,13 +490,7 @@ class ChatMessagesNotifier extends Notifier<List<ChatMessage>> {
     if (serverMessages.isEmpty && state.isNotEmpty) {
       return false;
     }
-    // Mirror-aware local-first: if the outbox still has a pending push,
-    // the server snapshot is staler than our local state — reject it.
-    // Once the mirror flushes, the outbox empties and server snapshots
-    // become authoritative again (including deletions from other devices).
-    if (serverMessages.length < state.length &&
-        _serverIsPrefixOfLocal(serverMessages) &&
-        _isMirrorPending()) {
+    if (gatewayShouldRejectServerAdoption(ref, serverMessages, state)) {
       return false;
     }
     if (_messagesDifferByCoreFields(serverMessages, state)) {
@@ -508,55 +502,6 @@ class ChatMessagesNotifier extends Notifier<List<ChatMessage>> {
       return _messagesDifferByStreamingSignatures(serverMessages, state);
     }
     return !listEquals(serverMessages, state);
-  }
-
-  bool _serverIsPrefixOfLocal(List<ChatMessage> serverMessages) {
-    if (serverMessages.length > state.length) return false;
-    for (var i = 0; i < serverMessages.length; i += 1) {
-      if (serverMessages[i].id != state[i].id) return false;
-    }
-    return true;
-  }
-
-  bool _localCacheExtendsServer(
-    List<ChatMessage> cached,
-    List<ChatMessage> server,
-  ) {
-    if (cached.length <= server.length) return false;
-    for (var i = 0; i < server.length; i += 1) {
-      if (cached[i].id != server[i].id) return false;
-    }
-    return true;
-  }
-
-  bool _isMirrorPending() {
-    final activeId = ref.read(activeConversationProvider)?.id;
-    if (activeId == null || activeId.isEmpty) return false;
-    return ref.read(owuiMirrorServiceProvider).isPending(activeId);
-  }
-
-  // Pillar #4: when switching to a conversation whose messages
-  // haven't been fetched yet, seed instantly from the local cache
-  // so the chat opens with content while the server refresh runs.
-  // Mirror-aware: if our outbox still has a pending push for this
-  // conversation, prefer the richer local view over a stale server
-  // snapshot.
-  List<ChatMessage> _seedMessagesForConversation(Conversation next) {
-    final initial = next.messages;
-    final cache = ref.read(conversationMessageCacheProvider);
-    final cached = cache.load(next.id);
-    if (initial.isEmpty) {
-      if (cached != null && cached.isNotEmpty) return cached;
-      return initial;
-    }
-    if (cached != null &&
-        cached.length > initial.length &&
-        _localCacheExtendsServer(cached, initial) &&
-        ref.read(owuiMirrorServiceProvider).isPending(next.id)) {
-      return cached;
-    }
-    unawaited(cache.save(next.id, initial));
-    return initial;
   }
 
   bool _messagesDifferByCoreFields(
@@ -807,13 +752,11 @@ class ChatMessagesNotifier extends Notifier<List<ChatMessage>> {
       _cancelMessageStream();
     }
 
-    // Pillar #4: persist adopted snapshot so a later cold open is instant.
-    final activeId = ref.read(activeConversationProvider)?.id;
-    if (activeId != null && activeId.isNotEmpty) {
-      unawaited(
-        ref.read(conversationMessageCacheProvider).save(activeId, serverMessages),
-      );
-    }
+    gatewayPersistMessages(
+      ref,
+      ref.read(activeConversationProvider)?.id,
+      serverMessages,
+    );
 
     DebugLogger.log(
       'Adopted server conversation snapshot from $source '
@@ -2119,16 +2062,10 @@ class ChatMessagesNotifier extends Notifier<List<ChatMessage>> {
     }
 
     _syncConversationStateAfterStreamingUpdate();
-    _persistMessagesToLocalCache();
-  }
-
-  void _persistMessagesToLocalCache() {
-    final activeId = ref.read(activeConversationProvider)?.id;
-    if (activeId == null || activeId.isEmpty || isTemporaryChat(activeId)) {
-      return;
-    }
-    unawaited(
-      ref.read(conversationMessageCacheProvider).save(activeId, state),
+    gatewayPersistMessages(
+      ref,
+      ref.read(activeConversationProvider)?.id,
+      state,
     );
   }
 
@@ -4200,19 +4137,10 @@ Future<void> _sendMessageInternal(
 }
 
 /// Returns a user-friendly error description based on the exception.
-///
-/// In debug builds we append the raw exception type + message to the
-/// fallback string so the actual failure (timeout, 422, parse error,
-/// StateError, etc.) is visible in the chat surface without having to
-/// dig through the debug console. Release builds keep the friendly text.
 String _errorContentForException(Object e) {
+  final gatewayMsg = gatewayErrorMessage(e);
+  if (gatewayMsg != null) return gatewayMsg;
   final msg = e.toString();
-  // Gateway exceptions carry the verbatim server response — surface it as-is
-  // so users can actually see why the request was rejected instead of getting
-  // the generic "image issue" string below.
-  if (msg.startsWith('[GATEWAY ')) {
-    return msg;
-  }
   if (msg.contains('400')) {
     return 'There was an issue with the message format. This might be '
         'because the image attachment couldn\'t be processed, the request '
@@ -4232,15 +4160,8 @@ String _errorContentForException(Object e) {
         'Please try selecting a different model or check with your '
         'administrator.';
   } else {
-    const fallback =
-        'An unexpected error occurred while processing your request. '
+    return 'An unexpected error occurred while processing your request. '
         'Please try again or check your connection.';
-    if (kDebugMode) {
-      // Surface the underlying exception inline so it shows up in the
-      // chat bubble during development. Keeps release builds clean.
-      return '$fallback\n\n[debug] ${e.runtimeType}: $msg';
-    }
-    return fallback;
   }
 }
 
