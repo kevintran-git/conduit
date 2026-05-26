@@ -131,7 +131,6 @@ class Routes {
   static const String audioSettings = '/profile/audio';
   static const String accountSettings = '/profile/account';
   static const String appCustomization = '/profile/customization';
-  static const String gatewaySettings = '/profile/gateway';
   static const String about = '/profile/about';
   static const String notes = '/notes';
   static const String noteEditor = '/notes/:id';
@@ -156,7 +155,6 @@ class RouteNames {
   static const String audioSettings = 'audio-settings';
   static const String accountSettings = 'account-settings';
   static const String appCustomization = 'app-customization';
-  static const String gatewaySettings = 'gateway-settings';
   static const String about = 'about';
   static const String notes = 'notes';
   static const String noteEditor = 'note-editor';

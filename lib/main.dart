@@ -32,6 +32,8 @@ import 'core/services/quick_actions_service.dart';
 import 'core/providers/app_startup_providers.dart';
 import 'shared/theme/tweakcn_themes.dart';
 import 'features/chat/voice_call/presentation/voice_call_launcher.dart';
+import 'core/providers/app_providers.dart' show apiServiceProvider;
+import 'inference_gateway/api/gateway_api_provider.dart';
 import 'inference_gateway/chat_tts/gateway_text_to_speech_service.dart';
 import 'inference_gateway/voice_call/presentation/gateway_call_launcher.dart';
 
@@ -180,6 +182,7 @@ void main() {
         overrides: [
           secureStorageProvider.overrideWithValue(secureStorage),
           hiveBoxesProvider.overrideWithValue(hiveBoxes),
+          apiServiceProvider.overrideWith(gatewayApiServiceProviderOverride),
           voiceCallLauncherProvider.overrideWith(
             (ref) => GatewayCallLauncher(ref),
           ),

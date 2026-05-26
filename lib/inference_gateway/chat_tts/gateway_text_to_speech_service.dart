@@ -2,11 +2,13 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../../core/models/backend_config.dart';
 import '../../core/providers/app_providers.dart';
 import '../../core/utils/debug_logger.dart';
 import '../../features/chat/services/text_to_speech_service.dart';
+import '../../features/chat/voice_call/application/voice_call_controller.dart';
 import '../audio/gateway_elevenlabs_tts_client.dart';
 import '../config/gateway_providers.dart';
 import '../router/gateway_router_providers.dart';
@@ -111,12 +113,27 @@ class GatewayTextToSpeechService extends TextToSpeechService {
       scope: 'gateway/chat-tts',
       data: {'text_len': text.length},
     );
-    await _ensureSpeaker().play(
-      text,
-      onStart: _onStart,
-      onComplete: _onComplete,
-      onError: _onError,
-    );
+    unawaited(WakelockPlus.enable());
+    try {
+      await _ensureSpeaker().play(
+        text,
+        onStart: _onStart,
+        onComplete: _onComplete,
+        onError: _onError,
+      );
+    } finally {
+      _releaseWakelockIfIdle();
+    }
+  }
+
+  /// Release the wake lock only when no voice call is in progress — the
+  /// call session has its own enable/disable pair, and a stray disable
+  /// from chat TTS would let the screen sleep mid-call.
+  void _releaseWakelockIfIdle() {
+    final callActive = _ref.read(voiceCallControllerProvider).isActive;
+    if (!callActive) {
+      unawaited(WakelockPlus.disable());
+    }
   }
 
   @override
@@ -125,6 +142,7 @@ class GatewayTextToSpeechService extends TextToSpeechService {
       await _speaker!.stop();
       // Surface a cancel event so the chat UI clears its speaking indicator.
       _onCancel?.call();
+      _releaseWakelockIfIdle();
     }
     await super.stop();
   }

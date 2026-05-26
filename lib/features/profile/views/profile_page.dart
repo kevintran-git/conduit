@@ -372,7 +372,7 @@ class ProfilePage extends ConsumerWidget {
         title: 'Inference Gateway',
         subtitle: 'Route STT, chat, and TTS to your own endpoint',
         onTap: () {
-          context.pushNamed(RouteNames.gatewaySettings);
+          context.pushNamed('gateway-settings');
         },
       ),
       _buildAboutTile(context),
