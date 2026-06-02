@@ -11,11 +11,14 @@ import '../../shared/widgets/themed_sheets.dart';
 import '../config/gateway_providers.dart';
 import '../sync/owui_mirror_providers.dart';
 
-/// Wraps the routed body so that whenever OWUI is unreachable but the gateway
-/// can still carry chat, a slim non-blocking banner appears at the top of the
-/// screen explaining what's degraded. When OWUI is reachable, or gateway chat
-/// is inactive, this returns [child] unchanged so the upstream UI is
-/// byte-identical to the no-gateway path.
+/// Wraps the routed body so the user always knows where gateway turns stand
+/// relative to OWUI:
+///   * OWUI unreachable  → "sync paused" banner (gateway still works).
+///   * online + failures → "N chats failed to sync — tap to retry" banner.
+///   * online + queued   → slim "Syncing N chats…" banner (clears when done).
+/// When gateway chat is inactive, or there's nothing to report, this returns
+/// [child] unchanged so the upstream UI is byte-identical to the no-gateway
+/// path.
 class GatewayConnectivityOverlay extends ConsumerWidget {
   const GatewayConnectivityOverlay({super.key, required this.child});
 
@@ -27,17 +30,25 @@ class GatewayConnectivityOverlay extends ConsumerWidget {
     if (!gatewayChatActive) return child;
 
     final connectivity = ref.watch(connectivityStatusProvider);
-    if (connectivity != ConnectivityStatus.offline) return child;
+    final status = ref.watch(owuiMirrorStatusProvider);
+    final offline = connectivity == ConnectivityStatus.offline;
+
+    // Online and fully caught up: nothing to show.
+    if (!offline && !status.hasWork) return child;
 
     final mq = MediaQuery.of(context);
     final topInset = mq.viewPadding.top;
+
+    final Widget banner = offline
+        ? _OwuiOfflineBanner(topInset: topInset)
+        : _OwuiSyncBanner(topInset: topInset, status: status);
 
     // Push the routed body down so the banner sits above the AppBar instead of
     // covering it. The child sees `viewPadding.top = 0` and `padding.top = 0`
     // so its SafeArea / status-bar-aware widgets don't double-pad.
     return Column(
       children: [
-        _OwuiOfflineBanner(topInset: topInset),
+        banner,
         Expanded(
           child: MediaQuery(
             data: mq.copyWith(
@@ -48,6 +59,95 @@ class GatewayConnectivityOverlay extends ConsumerWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Online banner covering the two non-offline states: queued (transient) and
+/// failed (needs attention). Tapping opens the shared details sheet.
+class _OwuiSyncBanner extends ConsumerWidget {
+  const _OwuiSyncBanner({required this.topInset, required this.status});
+
+  final double topInset;
+  final OwuiMirrorStatus status;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = context.conduitTheme;
+    final hasFailed = status.failed > 0;
+    final tone = hasFailed ? theme.error : theme.info;
+    final text = hasFailed
+        ? '${status.failed} ${status.failed == 1 ? "chat" : "chats"} failed to sync to OWUI — tap to retry'
+        : 'Syncing ${status.pending} ${status.pending == 1 ? "chat" : "chats"} to OWUI…';
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => ThemedSheets.showSurface<void>(
+          context: context,
+          builder: (_) => const _OwuiOfflineDetails(),
+        ),
+        child: Container(
+          padding: EdgeInsets.fromLTRB(
+            Spacing.md,
+            topInset + Spacing.xs,
+            Spacing.md,
+            Spacing.sm,
+          ),
+          decoration: BoxDecoration(
+            color: hasFailed
+                ? theme.errorBackground
+                : theme.surfaceBackground,
+            border: Border(
+              bottom: BorderSide(
+                color: tone.withValues(alpha: 0.35),
+                width: BorderWidth.regular,
+              ),
+            ),
+          ),
+          child: Row(
+            children: [
+              if (hasFailed)
+                Icon(
+                  Platform.isIOS
+                      ? CupertinoIcons.exclamationmark_triangle
+                      : Icons.sync_problem_rounded,
+                  size: IconSize.md,
+                  color: tone,
+                )
+              else
+                SizedBox(
+                  width: IconSize.md,
+                  height: IconSize.md,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: tone,
+                  ),
+                ),
+              const SizedBox(width: Spacing.sm),
+              Expanded(
+                child: Text(
+                  text,
+                  style: theme.bodySmall?.copyWith(
+                    color: theme.textPrimary,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: Spacing.sm),
+              Icon(
+                Platform.isIOS
+                    ? CupertinoIcons.chevron_right
+                    : Icons.chevron_right_rounded,
+                size: IconSize.sm,
+                color: theme.textSecondary,
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -132,13 +232,15 @@ class _OwuiOfflineDetails extends ConsumerStatefulWidget {
 
 class _OwuiOfflineDetailsState extends ConsumerState<_OwuiOfflineDetails> {
   bool _retrying = false;
+  bool _retryingSync = false;
 
   @override
   Widget build(BuildContext context) {
     final theme = context.conduitTheme;
     final activeServer = ref.read(activeServerProvider).asData?.value;
-    final mirror = ref.read(owuiMirrorServiceProvider);
-    final pending = mirror.pendingCount;
+    final status = ref.watch(owuiMirrorStatusProvider);
+    final pending = status.pending;
+    final failed = status.failed;
     final host = _hostOf(activeServer?.url);
 
     return Padding(
@@ -200,15 +302,35 @@ class _OwuiOfflineDetailsState extends ConsumerState<_OwuiOfflineDetails> {
           ),
           const SizedBox(height: Spacing.md),
           _StatusSection(
-            title: pending == 0
-                ? 'Queued for OWUI'
-                : 'Queued for OWUI ($pending pending)',
-            tone: theme.warning,
+            title: _queuedTitle(pending, failed),
+            tone: failed > 0 ? theme.error : theme.warning,
             items: const [
               'New messages waiting to mirror to other devices',
               'Conversation title and metadata edits',
             ],
           ),
+          if (pending > 0) ...[
+            const SizedBox(height: Spacing.sm),
+            OutlinedButton.icon(
+              onPressed: _retryingSync ? null : _retrySync,
+              icon: _retryingSync
+                  ? SizedBox(
+                      width: IconSize.sm,
+                      height: IconSize.sm,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: theme.textPrimary,
+                      ),
+                    )
+                  : Icon(
+                      Platform.isIOS
+                          ? CupertinoIcons.arrow_2_circlepath
+                          : Icons.sync_rounded,
+                      size: IconSize.sm,
+                    ),
+              label: Text(_retryingSync ? 'Retrying…' : 'Retry sync now'),
+            ),
+          ],
           const SizedBox(height: Spacing.md),
           _StatusSection(
             title: "Won't work until OWUI is back",
@@ -269,6 +391,21 @@ class _OwuiOfflineDetailsState extends ConsumerState<_OwuiOfflineDetails> {
     } finally {
       if (mounted) setState(() => _retrying = false);
     }
+  }
+
+  Future<void> _retrySync() async {
+    setState(() => _retryingSync = true);
+    try {
+      await ref.read(owuiMirrorServiceProvider).retryAll();
+    } finally {
+      if (mounted) setState(() => _retryingSync = false);
+    }
+  }
+
+  static String _queuedTitle(int pending, int failed) {
+    if (pending == 0) return 'Queued for OWUI';
+    if (failed > 0) return 'Queued for OWUI ($pending pending, $failed failed)';
+    return 'Queued for OWUI ($pending pending)';
   }
 
   String? _hostOf(String? url) {

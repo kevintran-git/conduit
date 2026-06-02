@@ -1976,11 +1976,11 @@ class ChatMessagesNotifier extends Notifier<List<ChatMessage>> {
     }
 
     _syncConversationStateAfterStreamingUpdate();
-    gatewayPersistMessages(
-      ref,
-      ref.read(activeConversationProvider)?.id,
-      state,
-    );
+    final completedConversationId = ref.read(activeConversationProvider)?.id;
+    gatewayPersistMessages(ref, completedConversationId, state);
+    // Enqueue the OWUI mirror push now that the turn is finalized and cached —
+    // doing it here (not at session start) avoids racing the live stream.
+    gatewayMarkConversationDirty(ref, completedConversationId);
   }
 
   void completeStreamingUi() {
