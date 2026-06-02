@@ -9,6 +9,7 @@ import '../../core/services/connectivity_service.dart';
 import '../../core/utils/debug_logger.dart';
 import '../cache/conversation_message_cache.dart';
 import 'owui_mirror_outbox.dart';
+import 'owui_mirror_providers.dart';
 
 /// Pushes locally-completed gateway turns to OWUI so other devices stay in
 /// sync. The inference path never waits on this — `markDirty` enqueues, the
@@ -29,11 +30,14 @@ class OwuiMirrorService {
   ProviderSubscription<ConnectivityStatus>? _connectivitySub;
   bool _wired = false;
 
-  /// A conversation whose last assistant turn never finished streaming
-  /// (e.g. app force-killed mid-stream) stays "isStreaming: true" in the
-  /// cache forever. Without a cap, we'd requeue every 1.5s for the lifetime
-  /// of the process. Drop it after this long.
-  static const Duration _maxPendingAge = Duration(minutes: 30);
+  /// Debounce for the first flush after a conversation is marked dirty.
+  static const Duration _flushDebounce = Duration(milliseconds: 1500);
+
+  /// Cadence for retrying transient "not ready yet" conditions (cache not
+  /// populated, turn still streaming). Slower than [_flushDebounce] so a
+  /// genuinely stuck entry doesn't busy-loop; it still self-heals quickly when
+  /// the cache repopulates (resume / connectivity / reopen also trigger flush).
+  static const Duration _transientRequeue = Duration(seconds: 6);
 
   /// Called from the app startup providers — begins watching connectivity
   /// and drains anything left over from a previous session.
@@ -68,7 +72,22 @@ class OwuiMirrorService {
 
   /// Count of conversations with a pending OWUI push. Read by the UI so it
   /// can tell the user how much sync work is queued while OWUI is unreachable.
-  int get pendingCount => _outbox.pending().length;
+  int get pendingCount => _outbox.pendingCount();
+
+  /// Count of conversations that have exhausted automatic retries and are
+  /// flagged failed (kept queued, surfaced for manual retry).
+  int get failedCount => _outbox.failedCount();
+
+  /// Publish current queue depth to [owuiMirrorStatusProvider] so the UI can
+  /// react. Best-effort: never let status plumbing break a flush.
+  void _notifyStatus() {
+    try {
+      _ref.read(owuiMirrorStatusProvider.notifier).set(
+            pending: _outbox.pendingCount(),
+            failed: _outbox.failedCount(),
+          );
+    } catch (_) {}
+  }
 
   /// True when [conversationId] has a pending push not yet mirrored to OWUI.
   /// Chat-merge logic uses this to decide whether a fresh server snapshot is
@@ -90,18 +109,55 @@ class OwuiMirrorService {
       return;
     }
     await _outbox.markDirty(conversationId);
+    _notifyStatus();
     _scheduleFlush();
   }
 
   void _scheduleFlush() {
     _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 1500), () {
+    _debounce = Timer(_flushDebounce, () {
       unawaited(flush());
     });
   }
 
+  /// Reschedule a flush based on the soonest entry that's ready to retry. Honors
+  /// per-entry backoff (set after a real push error); entries with no backoff
+  /// (transient "not ready" conditions) retry at the slower [_transientRequeue]
+  /// cadence so a stuck entry doesn't busy-loop.
+  void _scheduleRequeue() {
+    _debounce?.cancel();
+    final now = DateTime.now();
+    Duration delay = _transientRequeue;
+    DateTime? soonest;
+    for (final entry in _outbox.pending()) {
+      final next = entry.nextAttemptAt;
+      if (next == null) {
+        // Transient requeue — slower fixed cadence.
+        soonest = null;
+        delay = _transientRequeue;
+        break;
+      }
+      if (soonest == null || next.isBefore(soonest)) soonest = next;
+    }
+    if (soonest != null) {
+      final remaining = soonest.difference(now);
+      delay = remaining > Duration.zero ? remaining : _flushDebounce;
+    }
+    _debounce = Timer(delay, () => unawaited(flush()));
+  }
+
+  /// Manual "retry now": clear backoff/failed flags and flush immediately.
+  Future<void> retryAll() async {
+    await _outbox.resetBackoff();
+    _notifyStatus();
+    await flush(force: true);
+  }
+
   /// Push every dirty conversation to OWUI. Safe to call repeatedly.
-  Future<void> flush() async {
+  ///
+  /// [force] bypasses per-entry backoff (used by manual retry / connectivity
+  /// restore) so everything queued is attempted right away.
+  Future<void> flush({bool force = false}) async {
     if (_flushing) return;
     _flushing = true;
     var requeue = false;
@@ -115,41 +171,25 @@ class OwuiMirrorService {
 
       final now = DateTime.now();
       for (final entry in pending) {
-        // Don't let a stuck conversation churn the loop indefinitely.
-        if (now.difference(entry.dirtyAt) > _maxPendingAge) {
-          DebugLogger.warning(
-            'mirror-dropped-stale',
-            scope: 'gateway/mirror',
-            data: {
-              'conversationId': entry.conversationId,
-              'ageMinutes': now.difference(entry.dirtyAt).inMinutes,
-              'retries': entry.retries,
-            },
-          );
-          await _outbox.markFlushed(entry.conversationId);
+        // Respect backoff for entries that recently failed a real push.
+        if (!force &&
+            entry.nextAttemptAt != null &&
+            now.isBefore(entry.nextAttemptAt!)) {
+          requeue = true;
           continue;
         }
         final messages = cache.load(entry.conversationId) ?? const [];
         if (messages.isEmpty) {
-          // Cache hasn't populated yet — the user may not have reopened
-          // this chat post-restart. Bump retries (drops after maxRetries)
-          // and try again next cycle.
-          final dropped = await _outbox.recordFailure(
-            entry.conversationId,
-            'no local messages cached',
-          );
-          if (!dropped) requeue = true;
+          // Cache hasn't populated yet (e.g. chat not reopened post-restart).
+          // Transient, NOT a failure — requeue without burning the retry
+          // budget so a real push error is what eventually flags it.
+          requeue = true;
           continue;
         }
-        // A stuck `isStreaming: true` (app killed mid-stream) would otherwise
-        // requeue forever. Bump retries on each cycle so the maxRetries cap
-        // breaks the loop instead of burning CPU until _maxPendingAge.
+        // Defensive: a turn still streaming shouldn't be pushed. With
+        // enqueue-on-completion this is rare; treat as transient, no retry burn.
         if (messages.any((m) => m.role == 'assistant' && m.isStreaming)) {
-          final dropped = await _outbox.recordFailure(
-            entry.conversationId,
-            'assistant message still streaming',
-          );
-          if (!dropped) requeue = true;
+          requeue = true;
           continue;
         }
         try {
@@ -171,14 +211,15 @@ class OwuiMirrorService {
             stackTrace: stackTrace,
             data: {'conversationId': entry.conversationId},
           );
-          final dropped =
-              await _outbox.recordFailure(entry.conversationId, error);
-          if (!dropped) requeue = true;
+          // Keep the entry (never lose data), back off, and retry later.
+          await _outbox.recordFailure(entry.conversationId, error);
+          requeue = true;
         }
       }
     } finally {
       _flushing = false;
-      if (requeue) _scheduleFlush();
+      _notifyStatus();
+      if (requeue) _scheduleRequeue();
     }
   }
 

@@ -4,8 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/models/chat_message.dart';
 import '../../core/models/conversation.dart';
-import '../../core/providers/app_providers.dart'
-    show activeConversationProvider, isTemporaryChat;
+import '../../core/providers/app_providers.dart' show isTemporaryChat;
 import '../cache/conversation_message_cache.dart';
 import '../config/gateway_providers.dart';
 import 'owui_mirror_providers.dart';
@@ -46,20 +45,39 @@ List<ChatMessage>? gatewaySeedMessagesForConversation(
   return null;
 }
 
-/// True when the server snapshot looks like a stale prefix of local state
-/// AND the gateway mirror still has a pending push for this conversation.
-/// In that case the caller should keep local state instead of adopting
-/// the server view.
+/// True when the caller should keep local state instead of adopting the
+/// server snapshot.
+///
+/// In the gateway / local-first model a server snapshot that is a strict
+/// prefix of local state means "OWUI hasn't caught up yet" (propagation lag or
+/// a not-yet-landed push), not a remote deletion — adopting it would drop the
+/// turn the user just saw. So we reject any strict-prefix server view while
+/// gateway chat is active, regardless of whether a push is still pending.
+///
+/// This is self-healing: once OWUI returns an equal-or-longer list the guard
+/// returns false and normal adoption resumes. A genuine remote *truncation*
+/// from another device won't propagate, which is an acceptable trade-off for a
+/// single-user local-first app. Divergent server snapshots (not a prefix) are
+/// still adopted — those are real remote edits.
 bool gatewayShouldRejectServerAdoption(
   Ref ref,
   List<ChatMessage> serverMessages,
   List<ChatMessage> localState,
 ) {
+  if (!ref.read(gatewayChatActiveProvider)) return false;
   if (serverMessages.length >= localState.length) return false;
-  if (!_serverIsPrefixOfLocal(serverMessages, localState)) return false;
-  final activeId = ref.read(activeConversationProvider)?.id;
-  if (activeId == null || activeId.isEmpty) return false;
-  return ref.read(owuiMirrorServiceProvider).isPending(activeId);
+  return _serverIsPrefixOfLocal(serverMessages, localState);
+}
+
+/// Enqueues an OWUI mirror push for [conversationId] once a gateway turn is
+/// finalized. No-ops for null/empty, temporary, or local-only chats, and when
+/// chat gateway is off. Idempotent — safe to call from both completion paths.
+void gatewayMarkConversationDirty(Ref ref, String? conversationId) {
+  if (conversationId == null || conversationId.isEmpty) return;
+  if (isTemporaryChat(conversationId)) return;
+  if (conversationId.startsWith('local:')) return;
+  if (!ref.read(gatewayChatActiveProvider)) return;
+  unawaited(ref.read(owuiMirrorServiceProvider).markDirty(conversationId));
 }
 
 /// Persists [messages] under [conversationId] in the gateway cache so the

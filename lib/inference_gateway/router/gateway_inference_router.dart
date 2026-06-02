@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:typed_data';
 
 
@@ -31,6 +30,11 @@ class GatewayInferenceRouter {
   final GatewayCompletionsClient completions;
   final GatewaySttClient stt;
   final GatewayTtsClient tts;
+
+  /// Held so that constructing the router (eagerly, via `ApiService`) forces the
+  /// mirror service to be created and `wire()`d at startup — that's what sets up
+  /// connectivity-restore flushing and the cold-start drain. The actual push is
+  /// enqueued from the chat completion path, not here.
   final OwuiMirrorService mirror;
   final bool Function() _chatActive;
   final bool Function() _sttActive;
@@ -80,12 +84,12 @@ class GatewayInferenceRouter {
       conversationId: conversationId,
       responseMessageId: responseMessageId,
     );
-    // Schedule a background push to OWUI once the local stream finishes. The
-    // mirror service handles "still streaming" / offline / retries; we just
-    // tell it which conversation has new state.
-    if (conversationId != null && conversationId.isNotEmpty) {
-      unawaited(mirror.markDirty(conversationId));
-    }
+    // NOTE: the OWUI mirror push is enqueued when the assistant turn finishes
+    // streaming (ChatMessagesNotifier._completeStreamingMessage via
+    // gatewayMarkConversationDirty), NOT here. Enqueuing at session start
+    // raced the stream: the debounced flush fired while the turn was still
+    // streaming / before the cache was written, burning the retry budget and
+    // dropping the turn before it ever landed.
     return session;
   }
 
