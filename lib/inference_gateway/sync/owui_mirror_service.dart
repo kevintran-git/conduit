@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/models/chat_message.dart';
@@ -19,7 +20,7 @@ import 'owui_mirror_providers.dart';
 /// We push the FULL authoritative message list per conversation using the
 /// existing `ApiService.syncConversationMessages`, so OWUI ends up holding
 /// the same tree the device has — no per-turn merge logic needed here.
-class OwuiMirrorService {
+class OwuiMirrorService with WidgetsBindingObserver {
   OwuiMirrorService(this._ref) : _outbox = OwuiMirrorOutbox();
 
   final Ref _ref;
@@ -44,6 +45,11 @@ class OwuiMirrorService {
   void wire() {
     if (_wired) return;
     _wired = true;
+    // Drain anything that didn't reach OWUI before the app was backgrounded,
+    // as soon as we return to the foreground. (Previously lived in
+    // app_startup_providers' foreground observer; kept here so the gateway
+    // owns its own sync lifecycle and core files stay closer to upstream.)
+    WidgetsBinding.instance.addObserver(this);
     _connectivitySub = _ref.listen<ConnectivityStatus>(
       connectivityStatusProvider,
       (previous, next) {
@@ -63,7 +69,15 @@ class OwuiMirrorService {
     Future.microtask(flush);
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(flush());
+    }
+  }
+
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _debounce?.cancel();
     _connectivitySub?.close();
     _connectivitySub = null;
