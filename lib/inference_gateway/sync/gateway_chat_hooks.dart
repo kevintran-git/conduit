@@ -97,6 +97,19 @@ void gatewayPersistMessages(
   );
 }
 
+/// Whether a chat request should include the full local message history.
+///
+/// Open WebUI keeps server-side conversation memory, so Conduit only sends a
+/// system prompt for non-temporary chats. The gateway has no such memory, so
+/// when it's handling chat we send the full history (same as the temporary
+/// path). Equivalent to `isTemporary || gatewayChatActive`.
+///
+/// [ref] is deliberately `dynamic`: the chat_providers call sites are typed
+/// `dynamic ref` (invoked with either a Ref or a WidgetRef), so this preserves
+/// their dynamic `.read` dispatch exactly rather than forcing a downcast.
+bool gatewaySendFullHistory(dynamic ref, bool isTemporary) =>
+    isTemporary || ref.read(gatewayChatActiveProvider);
+
 /// Returns a user-facing message for gateway-originated exceptions, or
 /// `null` to let the caller's default error rendering handle it.
 String? gatewayErrorMessage(Object error) {
