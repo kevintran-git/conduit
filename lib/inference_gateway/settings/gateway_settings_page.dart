@@ -2,8 +2,10 @@ import 'package:adaptive_platform_ui/adaptive_platform_ui.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../features/profile/widgets/customization_tile.dart';
+import '../../features/profile/widgets/profile_setting_tile.dart';
 import '../../features/profile/widgets/settings_page_scaffold.dart';
 import '../../shared/theme/theme_extensions.dart';
 import '../../shared/utils/ui_utils.dart';
@@ -419,4 +421,48 @@ class _StatusLine extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Settings-list entry that opens [GatewaySettingsPage].
+///
+/// Defined here, rather than inline in the upstream profile page, so that
+/// `profile_page.dart` stays a single-line hook and rarely conflicts when
+/// rebasing onto upstream. Styling mirrors the page's other account tiles.
+Widget gatewayProfileTile(BuildContext context) {
+  final theme = context.conduitTheme;
+  final color = theme.buttonPrimary;
+  return ProfileSettingTile(
+    onTap: () => context.pushNamed('gateway-settings'),
+    leading: Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(AppBorderRadius.small),
+        border: Border.all(
+          color: color.withValues(alpha: 0.2),
+          width: BorderWidth.thin,
+        ),
+      ),
+      alignment: Alignment.center,
+      child: Icon(
+        UiUtils.platformIcon(
+          ios: CupertinoIcons.bolt_horizontal_circle,
+          android: Icons.bolt,
+        ),
+        color: color,
+        size: IconSize.medium,
+      ),
+    ),
+    title: 'Inference Gateway',
+    subtitle: 'Route STT, chat, and TTS to your own endpoint',
+    trailing: Icon(
+      UiUtils.platformIcon(
+        ios: CupertinoIcons.chevron_right,
+        android: Icons.chevron_right,
+      ),
+      color: theme.iconSecondary,
+      size: IconSize.small,
+    ),
+  );
 }
