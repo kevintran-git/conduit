@@ -30,8 +30,6 @@ import '../../../shared/services/tasks/task_queue.dart';
 import '../../tools/providers/tools_providers.dart';
 import '../services/chat_transport_dispatch.dart';
 import '../services/reviewer_mode_service.dart';
-import '../../../inference_gateway/config/gateway_providers.dart'
-    show gatewayChatActiveProvider;
 import '../../../inference_gateway/sync/gateway_chat_hooks.dart';
 
 part 'chat_capability_providers.dart';
@@ -3095,13 +3093,9 @@ Future<void> regenerateMessage(
     final isTemporary =
         isTemporaryChat(activeConversation.id) ||
         ref.read(temporaryChatEnabledProvider);
-    // When the inference gateway handles chat completions, it has no
-    // server-side conversation memory the way Open WebUI does — so we must
-    // hand it the full message history, same as the temporary-chat path.
-    final sendFullHistory = isTemporary || ref.read(gatewayChatActiveProvider);
     final requestMessages = _buildChatCompletionMessages(
       conversationMessages: conversationMessages,
-      isTemporary: sendFullHistory,
+      isTemporary: gatewaySendFullHistory(ref, isTemporary),
     );
 
     // Pre-seed assistant skeleton and persist chain; always use a new id so
@@ -3713,13 +3707,9 @@ Future<void> _sendMessageInternal(
   final isTemporary =
       (activeConversation != null && isTemporaryChat(activeConversation.id)) ||
       ref.read(temporaryChatEnabledProvider);
-  // Inference gateway has no server-side conversation memory — send the
-  // full local history so it can answer in-context. (See the matching
-  // comment in the other build site above.)
-  final sendFullHistory = isTemporary || ref.read(gatewayChatActiveProvider);
   final requestMessages = _buildChatCompletionMessages(
     conversationMessages: conversationMessages,
-    isTemporary: sendFullHistory,
+    isTemporary: gatewaySendFullHistory(ref, isTemporary),
   );
 
   // Check feature toggles for API (gated by server availability)
