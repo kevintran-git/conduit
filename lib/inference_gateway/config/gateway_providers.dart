@@ -24,6 +24,10 @@ class GatewayConfigNotifier extends Notifier<GatewayConfig> {
 
   Future<void> _hydrateApiKey() async {
     final key = await _storage.loadApiKey();
+    // The provider can be disposed while the secure-storage read is in flight
+    // (e.g. short-lived test containers, or the user signing out). Touching
+    // `state` after disposal throws, so bail if we're no longer mounted.
+    if (!ref.mounted) return;
     if (key.isEmpty && state.apiKey.isEmpty) return;
     state = state.copyWith(apiKey: key);
   }
