@@ -1,6 +1,9 @@
 # Worktrees
 .worktrees/
 
+# Claude Code local config (may contain sensitive tokens/hooks)
+.claude/
+
 # Miscellaneous
 *.class
 *.log
