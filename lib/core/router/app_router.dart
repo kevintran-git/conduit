@@ -34,7 +34,7 @@ import '../../features/profile/views/audio_settings_page.dart';
 import '../../features/profile/views/personalization_page.dart';
 import '../../features/profile/views/profile_page.dart';
 import '../../inference_gateway/config/gateway_providers.dart';
-import '../../inference_gateway/settings/gateway_settings_page.dart';
+import '../../inference_gateway/router/gateway_routes.dart';
 import '../../l10n/app_localizations.dart';
 import '../models/server_config.dart';
 
@@ -144,13 +144,11 @@ class RouterNotifier extends ChangeNotifier {
     // 4. App is in foreground and offline warning isn't suppressed
     // 5. No active streaming is in progress (avoid interrupting chat streams)
     final hasActiveStreams = ref.read(isChatStreamingProvider);
-    // When the inference gateway is handling chat, OWUI being unreachable is
-    // not a blocking failure — the app stays usable on local cache + gateway.
-    // The GatewayConnectivityOverlay shows a non-blocking banner instead.
-    final gatewayCanCarry = ref.read(gatewayChatActiveProvider);
     final shouldShowConnectionIssue =
         !reviewerMode &&
-        !gatewayCanCarry &&
+        // Gateway carries chat on local cache when OWUI is unreachable, so
+        // don't gate the app behind the offline page; a banner shows instead.
+        !ref.read(gatewayChatActiveProvider) &&
         connectivity == ConnectivityStatus.offline &&
         authState == AuthNavigationState.authenticated &&
         connectivityService.isAppForeground &&
@@ -391,12 +389,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       pageBuilder: (context, state) =>
           _buildPlatformPage(state: state, child: const AppCustomizationPage()),
     ),
-    GoRoute(
-      path: '/profile/gateway',
-      name: 'gateway-settings',
-      pageBuilder: (context, state) =>
-          _buildPlatformPage(state: state, child: const GatewaySettingsPage()),
-    ),
+    ...gatewayRoutes(),
     GoRoute(
       path: Routes.about,
       name: RouteNames.about,
