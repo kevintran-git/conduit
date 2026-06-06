@@ -6,7 +6,6 @@ import '../../core/models/model.dart';
 import '../../core/services/api_service.dart';
 import '../../core/services/chat_completion_transport.dart';
 import '../../core/services/openwebui_stream_parser.dart';
-import '../../core/services/worker_manager.dart';
 import '../../core/utils/debug_logger.dart';
 import '../router/gateway_inference_router.dart';
 
