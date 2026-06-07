@@ -8,7 +8,7 @@ import '../../core/models/backend_config.dart';
 import '../../core/providers/app_providers.dart';
 import '../../core/utils/debug_logger.dart';
 import '../../features/chat/services/text_to_speech_service.dart';
-import '../../features/chat/voice_call/application/voice_call_controller.dart';
+import '../../features/chat/voice_mode/chat_voice_mode_controller.dart';
 import '../audio/gateway_elevenlabs_tts_client.dart';
 import '../config/gateway_providers.dart';
 import '../router/gateway_router_providers.dart';
@@ -130,7 +130,7 @@ class GatewayTextToSpeechService extends TextToSpeechService {
   /// call session has its own enable/disable pair, and a stray disable
   /// from chat TTS would let the screen sleep mid-call.
   void _releaseWakelockIfIdle() {
-    final callActive = _ref.read(voiceCallControllerProvider).isActive;
+    final callActive = _ref.read(chatVoiceModeControllerProvider).isActive;
     if (!callActive) {
       unawaited(WakelockPlus.disable());
     }
