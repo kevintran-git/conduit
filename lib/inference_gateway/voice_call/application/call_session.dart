@@ -12,6 +12,7 @@ import '../../../features/chat/providers/chat_providers.dart' as chat;
 import '../../config/gateway_providers.dart';
 import '../../router/gateway_router_providers.dart';
 import '../domain/call_step.dart';
+import 'call_background_lease.dart';
 import 'call_stt.dart';
 import 'call_tts.dart';
 
@@ -32,6 +33,11 @@ class CallSession extends Notifier<CallSessionState> {
   CallTts? _tts;
   StreamSubscription<bool>? _ttsPlayingSub;
   StreamSubscription<TtsStatus>? _ttsStatusSub;
+
+  /// Native background-execution lease, held for the whole call so it survives
+  /// backgrounding / screen lock. Acquired once setup succeeds, released in
+  /// [_teardown].
+  CallBackgroundLease? _backgroundLease;
 
   /// Broadcast pipe for chat messages updates. Used to detect end-of-stream
   /// (`isStreaming` flips false) so we can flush the TTS WS. Subscribed
@@ -179,6 +185,11 @@ class CallSession extends Notifier<CallSessionState> {
     try {
       final ok = await _setup();
       if (!ok) return;
+      // Keep the call alive when backgrounded / screen-locked. Fire-and-forget:
+      // it swallows its own errors and only matters once we leave foreground,
+      // so we don't delay the first listen on the platform handshake.
+      _backgroundLease = CallBackgroundLease();
+      unawaited(_backgroundLease!.acquire());
       HapticFeedback.lightImpact();
       while (_alive) {
         if (state.paused) {
@@ -510,11 +521,16 @@ class CallSession extends Notifier<CallSessionState> {
     final tts = _tts;
     final ttsPlayingSub = _ttsPlayingSub;
     final ttsStatusSub = _ttsStatusSub;
+    final backgroundLease = _backgroundLease;
     _stt = null;
     _tts = null;
     _ttsPlayingSub = null;
     _ttsStatusSub = null;
+    _backgroundLease = null;
     unawaited(() async {
+      try {
+        await backgroundLease?.release();
+      } catch (_) {}
       try {
         await ttsPlayingSub?.cancel();
       } catch (_) {}
