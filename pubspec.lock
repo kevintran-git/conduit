@@ -1039,6 +1039,13 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.2.2"
+  inference_kit:
+    dependency: "direct main"
+    description:
+      path: "../../inference_kit"
+      relative: true
+    source: path
+    version: "0.1.0"
   intl:
     dependency: "direct main"
     description:
