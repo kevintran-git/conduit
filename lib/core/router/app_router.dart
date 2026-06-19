@@ -33,6 +33,7 @@ import '../../features/profile/views/audio_settings_page.dart';
 import '../../features/profile/views/personalization_page.dart';
 import '../../features/profile/views/profile_page.dart';
 import '../../features/notifications/views/notification_settings_page.dart';
+import '../../inference_gateway/config/gateway_providers.dart';
 import '../../inference_gateway/router/gateway_routes.dart';
 import '../../l10n/app_localizations.dart';
 import '../models/server_config.dart';
@@ -57,7 +58,6 @@ class RouterNotifier extends ChangeNotifier {
   late final List<ProviderSubscription<dynamic>> _subscriptions;
 
   void _onStateChanged(dynamic previous, dynamic next) {
-    // Debounce router refreshes to avoid thrashing on rapid state changes
     _scheduleRefresh();
   }
 
@@ -83,7 +83,6 @@ class RouterNotifier extends ChangeNotifier {
     }
 
     if (reviewerMode) {
-      // Stay on whatever route if already in chat; otherwise go to chat
       if (location == Routes.chat) return null;
       return Routes.chat;
     }
@@ -91,7 +90,6 @@ class RouterNotifier extends ChangeNotifier {
     if (activeServerAsync.isLoading) {
       // Avoid redirect loops: do not override explicit auth routes while loading
       if (_isAuthLocation(location)) return null;
-      // Keep splash during server loading otherwise
       return location == Routes.splash ? null : Routes.splash;
     }
 
@@ -103,9 +101,6 @@ class RouterNotifier extends ChangeNotifier {
     final hasActiveServer = activeServer != null;
     if (!hasActiveServer) {
       // No server configured - redirect to server connection
-      // Exception: allow staying on server connection, authentication,
-      // proxy auth, and SSO pages during the connection/auth flow.
-      // But always redirect away from connection issue page (user logged out)
       if (location == Routes.serverConnection ||
           location == Routes.authentication ||
           location == Routes.proxyAuth ||
@@ -139,10 +134,7 @@ class RouterNotifier extends ChangeNotifier {
 
     final authState = ref.read(authNavigationStateProvider);
 
-    // Allow staying on server connection page
     if (location == Routes.serverConnection) {
-      // If authenticated but on server connection page, go to chat
-      // Otherwise stay on server connection page (for back navigation)
       return authState == AuthNavigationState.authenticated
           ? Routes.chat
           : null;
@@ -152,12 +144,10 @@ class RouterNotifier extends ChangeNotifier {
       case AuthNavigationState.loading:
         // Keep user on auth routes while loading to prevent bounce
         if (_isAuthLocation(location)) return null;
-        // Otherwise keep splash during session establishment
         return location == Routes.splash ? null : Routes.splash;
       case AuthNavigationState.needsLogin:
         if (location == Routes.connectionIssue) return null;
         // Redirect to authentication page if not already on an auth route
-        // This handles the post-logout case where we want sign-in, not server setup
         if (_isAuthLocation(location)) return null;
         return Routes.authentication;
       case AuthNavigationState.error:
@@ -168,10 +158,8 @@ class RouterNotifier extends ChangeNotifier {
         final isAuthFormRoute =
             location == Routes.login || location == Routes.authentication;
         if (!hasValidToken && isAuthFormRoute) {
-          // Keep user on the login/authentication flow to show inline errors
           return null;
         }
-        // Otherwise show connection issue page for recoverable auth errors
         return location == Routes.connectionIssue
             ? null
             : Routes.connectionIssue;
@@ -263,9 +251,6 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         child: const SplashLauncherPage(),
       ),
     ),
-    // ShellRoute keeps the drawer/sidebar mounted across page navigations
-    // so it doesn't reload on tablets when switching between chat, channels,
-    // and notes.
     ShellRoute(
       builder: (context, state, child) => DrawerShellPage(child: child),
       routes: [
@@ -347,7 +332,6 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       name: RouteNames.authentication,
       pageBuilder: (context, state) {
         final extra = state.extra;
-        // Support both AuthFlowConfig (new) and ServerConfig (legacy)
         if (extra is AuthFlowConfig) {
           return _buildPlatformPage(
             state: state,
@@ -384,7 +368,6 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       pageBuilder: (context, state) {
         final config = state.extra;
         if (config is! ProxyAuthConfig) {
-          // Fallback - should not happen in normal flow
           return _buildPlatformPage(
             state: state,
             child: const ServerConnectionPage(),
