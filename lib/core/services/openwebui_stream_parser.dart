@@ -300,6 +300,13 @@ const int _lineFeed = 0x0A;
 const int _carriageReturn = 0x0D;
 
 OpenWebUIEventUpdate? _eventUpdateFromMap(Map<dynamic, dynamic> raw) {
+  // [GATEWAY] OpenAI-compatible chunks always carry `choices`. Some proxies
+  // (e.g. our inference gateway at api.kvt.codes) attach a debug `type`
+  // field to them; without this guard those chunks get hijacked into
+  // generic events and their `delta.content` is dropped. Caller falls
+  // through to the `parsed['choices']` path so content still streams.
+  if (raw['choices'] is List) return null;
+
   final type = raw['type']?.toString();
   if (type == null || type.isEmpty || type.startsWith('response.')) {
     return null;

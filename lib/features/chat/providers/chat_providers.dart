@@ -44,6 +44,7 @@ import '../../tools/providers/tools_providers.dart';
 import '../services/chat_transport_dispatch.dart';
 import '../services/file_attachment_service.dart';
 import '../services/reviewer_mode_service.dart';
+import '../../../inference_gateway/sync/gateway_chat_hooks.dart';
 
 part 'chat_capability_providers.dart';
 part 'chat_composer_providers.dart';
@@ -395,7 +396,8 @@ class ChatMessagesNotifier extends Notifier<List<ChatMessage>> {
         _stopRemoteTaskMonitor();
 
         if (next != null) {
-          final nextMessages = next.messages;
+          final nextMessages =
+              gatewaySeedMessagesForConversation(ref, next) ?? next.messages;
           final currentMessagesAlreadyVisible =
               state.isNotEmpty &&
               !_messagesDifferByStreamingSignatures(nextMessages, state);
@@ -553,6 +555,9 @@ class ChatMessagesNotifier extends Notifier<List<ChatMessage>> {
 
   bool _shouldAdoptServerMessages(List<ChatMessage> serverMessages) {
     if (serverMessages.isEmpty && state.isNotEmpty) {
+      return false;
+    }
+    if (gatewayShouldRejectServerAdoption(ref, serverMessages, state)) {
       return false;
     }
     if (_messagesDifferByCoreFields(serverMessages, state)) {
@@ -813,6 +818,12 @@ class ChatMessagesNotifier extends Notifier<List<ChatMessage>> {
     if (needsCleanup) {
       _cancelMessageStream();
     }
+
+    gatewayPersistMessages(
+      ref,
+      ref.read(activeConversationProvider)?.id,
+      serverMessages,
+    );
 
     DebugLogger.log(
       'Adopted server conversation snapshot from $source '
@@ -2627,6 +2638,11 @@ class ChatMessagesNotifier extends Notifier<List<ChatMessage>> {
 
     _syncConversationStateAfterStreamingUpdate();
     _persistCompletedTurn();
+    final completedConversationId = ref.read(activeConversationProvider)?.id;
+    gatewayPersistMessages(ref, completedConversationId, state);
+    // Enqueue the OWUI mirror push now that the turn is finalized and cached —
+    // doing it here (not at session start) avoids racing the live stream.
+    gatewayMarkConversationDirty(ref, completedConversationId);
   }
 
   void completeStreamingUi() {
@@ -4021,7 +4037,7 @@ Future<void> regenerateMessage(
         ref.read(temporaryChatEnabledProvider);
     final requestMessages = _buildChatCompletionMessages(
       conversationMessages: conversationMessages,
-      isTemporary: isTemporary,
+      isTemporary: gatewaySendFullHistory(ref, isTemporary),
     );
 
     // Pre-seed assistant skeleton and persist chain; always use a new id so
@@ -5568,7 +5584,7 @@ Future<void> _sendMessageInternal(
       ref.read(temporaryChatEnabledProvider);
   final requestMessages = _buildChatCompletionMessages(
     conversationMessages: conversationMessages,
-    isTemporary: isTemporary,
+    isTemporary: gatewaySendFullHistory(ref, isTemporary),
   );
 
   // Check feature toggles for API (gated by server availability)
@@ -5785,6 +5801,8 @@ Future<void> _sendMessageInternal(
 
 /// Returns a user-friendly error description based on the exception.
 String chatErrorContentForException(Object e) {
+  final gatewayMsg = gatewayErrorMessage(e);
+  if (gatewayMsg != null) return gatewayMsg;
   final msg = e.toString();
   if (msg.contains('400')) {
     return 'There was an issue with the message format. This might be '

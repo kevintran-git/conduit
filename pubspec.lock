@@ -688,6 +688,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.4.8"
+  flutter_pcm_sound:
+    dependency: "direct main"
+    description:
+      name: flutter_pcm_sound
+      sha256: "15c6894da8195122001375084d51449bd77849579c93fca2800c00b615699dc0"
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.3.3"
   flutter_plugin_android_lifecycle:
     dependency: transitive
     description:
@@ -1079,6 +1087,13 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.2.2"
+  inference_kit:
+    dependency: "direct main"
+    description:
+      path: "../inference_kit"
+      relative: true
+    source: path
+    version: "0.1.0"
   intl:
     dependency: "direct main"
     description:
