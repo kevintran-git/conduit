@@ -4296,7 +4296,7 @@ Future<void> runQueuedCompletion(
     messages: messages,
     conversationSystemPrompt: activeConversation.systemPrompt,
     userSystemPrompt: userSystemPrompt,
-    isTemporary: isTemporary,
+    isTemporary: gatewaySendFullHistory(ref, isTemporary),
   );
 
   // Ensure the (already-existing) assistant placeholder is loaded + streaming.
@@ -4486,7 +4486,7 @@ Future<void> runHeadlessCompletion(
     messages: messages,
     conversationSystemPrompt: conversation.systemPrompt,
     userSystemPrompt: userSystemPrompt,
-    isTemporary: false,
+    isTemporary: gatewaySendFullHistory(ref, false),
   );
 
   final modelItem =
