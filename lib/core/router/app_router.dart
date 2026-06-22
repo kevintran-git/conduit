@@ -33,7 +33,6 @@ import '../../features/profile/views/audio_settings_page.dart';
 import '../../features/profile/views/personalization_page.dart';
 import '../../features/profile/views/profile_page.dart';
 import '../../features/notifications/views/notification_settings_page.dart';
-import '../../inference_gateway/config/gateway_providers.dart';
 import '../../inference_gateway/router/gateway_routes.dart';
 import '../../l10n/app_localizations.dart';
 import '../models/server_config.dart';

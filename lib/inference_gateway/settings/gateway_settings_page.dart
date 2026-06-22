@@ -292,11 +292,11 @@ class _GatewaySettingsPageState extends ConsumerState<GatewaySettingsPage> {
                       child: ConduitButton(
                         text: 'Save',
                         onPressed: () async {
+                          final messenger = ScaffoldMessenger.maybeOf(context);
                           await notifier.setCallSystemPrompt(
                             _callSystemPromptController.text,
                           );
-                          if (!mounted) return;
-                          ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                          messenger?.showSnackBar(
                             const SnackBar(
                               content: Text('Call system prompt saved'),
                               duration: Duration(seconds: 2),

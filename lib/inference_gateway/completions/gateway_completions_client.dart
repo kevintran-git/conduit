@@ -9,6 +9,7 @@ import '../../core/services/chat_completion_transport.dart';
 import '../../core/utils/debug_logger.dart';
 import '../transport/gateway_client.dart';
 import '../transport/gateway_exception.dart';
+import 'gateway_resilient_stream.dart';
 import 'reasoning_tag_splitter.dart';
 
 /// Talks to the gateway's OpenAI-compatible chat completion + models
@@ -45,9 +46,35 @@ class GatewayCompletionsClient {
       );
     }
 
+    final controller = GatewayResumeController();
+    final byteStream = resilientGatewayStream(
+      baseMessages: sanitized,
+      controller: controller,
+      open: (msgs) => _openUpstream(
+        messages: msgs,
+        model: model,
+        temperature: temperature,
+        maxTokens: maxTokens,
+      ),
+    );
+
+    return ChatCompletionSession.httpStream(
+      messageId: messageId,
+      conversationId: conversationId,
+      byteStream: byteStream,
+      abort: controller.abort,
+    );
+  }
+
+  Future<GatewayUpstream> _openUpstream({
+    required List<Map<String, dynamic>> messages,
+    required String model,
+    double? temperature,
+    int? maxTokens,
+  }) async {
     final body = <String, dynamic>{
       'model': model,
-      'messages': sanitized,
+      'messages': messages,
       'stream': true,
       'temperature': ?temperature,
       'max_tokens': ?maxTokens,
@@ -58,8 +85,8 @@ class GatewayCompletionsClient {
       scope: 'gateway/completions',
       data: {
         'model': model,
-        'message_count': sanitized.length,
-        'last_role': sanitized.last['role'],
+        'message_count': messages.length,
+        'last_role': messages.last['role'],
       },
     );
 
@@ -107,17 +134,8 @@ class GatewayCompletionsClient {
     }
 
     final stream = response.data?.stream ?? const Stream<List<int>>.empty();
-    // Reroute inline reasoning tags (`<think>...</think>`, etc.) into
-    // `delta.reasoning_content` so the streaming-helper renders them as the
-    // collapsible thinking widget instead of mixing them into the visible
-    // assistant content. Without this, raw gateway output reads tags out
-    // loud over TTS and folds them back into chat history on the next turn.
-    final rewritten = splitReasoningTagsInSseStream(stream);
-
-    return ChatCompletionSession.httpStream(
-      messageId: messageId,
-      conversationId: conversationId,
-      byteStream: rewritten,
+    return (
+      bytes: splitReasoningTagsInSseStream(stream),
       abort: () async {
         if (!cancelToken.isCancelled) {
           cancelToken.cancel('User cancelled');
