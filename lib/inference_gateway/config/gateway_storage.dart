@@ -23,8 +23,13 @@ class GatewayStorage {
   static const String _kTtsModel = 'gateway.tts_model';
   static const String _kTtsVoice = 'gateway.tts_voice';
   static const String _kVoiceManualMode = 'gateway.voice_manual_mode';
+  static const String _kRealtimeEnabled = 'gateway.realtime_enabled';
   static const String _kCallSystemPrompt = 'gateway.call_system_prompt';
+  static const String _kMcpEnabled = 'gateway.mcp_enabled';
+  static const String _kMcpServerUrl = 'gateway.mcp_server_url';
+  static const String _kStatsToolEnabled = 'gateway.stats_tool_enabled';
   static const String _kApiKey = 'inference_gateway_api_key';
+  static const String _kMcpBearerToken = 'inference_gateway_mcp_bearer_token';
 
   final FlutterSecureStorage _secureStorage;
 
@@ -44,9 +49,7 @@ class GatewayStorage {
     await box.put(key, value);
   }
 
-  /// Synchronously load everything except the API key.
-  /// The API key is loaded separately via [loadApiKey] (async, secure store).
-  GatewayConfig loadSync({required String apiKey}) {
+  GatewayConfig loadSync({required String apiKey, String mcpBearerToken = ''}) {
     return GatewayConfig(
       baseUrl: _read<String>(_kBaseUrl) ?? GatewayConfig.defaultBaseUrl,
       apiKey: apiKey,
@@ -57,13 +60,22 @@ class GatewayStorage {
       ttsModel: _read<String>(_kTtsModel) ?? GatewayConfig.defaultTtsModel,
       ttsVoice: _read<String>(_kTtsVoice) ?? GatewayConfig.defaultTtsVoice,
       voiceManualMode: _read<bool>(_kVoiceManualMode) ?? false,
+      realtimeEnabled: _read<bool>(_kRealtimeEnabled) ?? false,
       callSystemPrompt: _read<String>(_kCallSystemPrompt),
+      mcpEnabled: _read<bool>(_kMcpEnabled) ?? false,
+      mcpServerUrl: _read<String>(_kMcpServerUrl) ?? '',
+      mcpBearerToken: mcpBearerToken,
+      statsToolEnabled: _read<bool>(_kStatsToolEnabled) ?? false,
     );
   }
 
-  Future<String> loadApiKey() async {
+  Future<String> loadApiKey() => _readSecure(_kApiKey);
+
+  Future<String> loadMcpBearerToken() => _readSecure(_kMcpBearerToken);
+
+  Future<String> _readSecure(String key) async {
     try {
-      final value = await _secureStorage.read(key: _kApiKey);
+      final value = await _secureStorage.read(key: key);
       return value ?? '';
     } catch (_) {
       return '';
@@ -79,6 +91,8 @@ class GatewayStorage {
   Future<void> saveTtsVoice(String value) => _write(_kTtsVoice, value);
   Future<void> saveVoiceManualMode(bool value) =>
       _write(_kVoiceManualMode, value);
+  Future<void> saveRealtimeEnabled(bool value) =>
+      _write(_kRealtimeEnabled, value);
 
   Future<void> saveCallSystemPrompt(String? value) async {
     final box = _preferencesBox();
@@ -90,11 +104,20 @@ class GatewayStorage {
     }
   }
 
-  Future<void> saveApiKey(String value) async {
+  Future<void> saveMcpEnabled(bool value) => _write(_kMcpEnabled, value);
+  Future<void> saveMcpServerUrl(String value) => _write(_kMcpServerUrl, value);
+  Future<void> saveStatsToolEnabled(bool value) =>
+      _write(_kStatsToolEnabled, value);
+
+  Future<void> saveApiKey(String value) => _writeSecure(_kApiKey, value);
+  Future<void> saveMcpBearerToken(String value) =>
+      _writeSecure(_kMcpBearerToken, value);
+
+  Future<void> _writeSecure(String key, String value) async {
     if (value.isEmpty) {
-      await _secureStorage.delete(key: _kApiKey);
+      await _secureStorage.delete(key: key);
       return;
     }
-    await _secureStorage.write(key: _kApiKey, value: value);
+    await _secureStorage.write(key: key, value: value);
   }
 }

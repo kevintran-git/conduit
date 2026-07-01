@@ -32,7 +32,10 @@ class _GatewaySettingsPageState extends ConsumerState<GatewaySettingsPage> {
   late final TextEditingController _ttsModelController;
   late final TextEditingController _ttsVoiceController;
   late final TextEditingController _callSystemPromptController;
+  late final TextEditingController _mcpUrlController;
+  late final TextEditingController _mcpTokenController;
   bool _obscureKey = true;
+  bool _obscureMcpToken = true;
 
   @override
   void initState() {
@@ -45,6 +48,8 @@ class _GatewaySettingsPageState extends ConsumerState<GatewaySettingsPage> {
     _callSystemPromptController = TextEditingController(
       text: cfg.callSystemPrompt ?? '',
     );
+    _mcpUrlController = TextEditingController(text: cfg.mcpServerUrl);
+    _mcpTokenController = TextEditingController(text: cfg.mcpBearerToken);
   }
 
   @override
@@ -54,6 +59,8 @@ class _GatewaySettingsPageState extends ConsumerState<GatewaySettingsPage> {
     _ttsModelController.dispose();
     _ttsVoiceController.dispose();
     _callSystemPromptController.dispose();
+    _mcpUrlController.dispose();
+    _mcpTokenController.dispose();
     super.dispose();
   }
 
@@ -74,6 +81,8 @@ class _GatewaySettingsPageState extends ConsumerState<GatewaySettingsPage> {
       _hydrateIfEmpty(_ttsModelController, next.ttsModel);
       _hydrateIfEmpty(_ttsVoiceController, next.ttsVoice);
       _hydrateIfEmpty(_callSystemPromptController, next.callSystemPrompt ?? '');
+      _hydrateIfEmpty(_mcpUrlController, next.mcpServerUrl);
+      _hydrateIfEmpty(_mcpTokenController, next.mcpBearerToken);
     });
     final cfg = ref.watch(gatewayConfigProvider);
     final theme = context.conduitTheme;
@@ -202,6 +211,96 @@ class _GatewaySettingsPageState extends ConsumerState<GatewaySettingsPage> {
           onChanged: notifier.setVoiceEnabled,
         ),
         settingsSectionGap,
+        SettingsSectionHeader(title: 'Tools'),
+        const SizedBox(height: Spacing.sm),
+        _buildToggleTile(
+          context: context,
+          icon: Icons.query_stats,
+          title: 'Chat usage stats tool',
+          subtitle:
+              'Lets the model call Open WebUI\'s usage-stats endpoint to answer questions about your chat history.',
+          value: cfg.statsToolEnabled,
+          onChanged: notifier.setStatsToolEnabled,
+        ),
+        const SizedBox(height: Spacing.sm),
+        _buildToggleTile(
+          context: context,
+          icon: Icons.hub_outlined,
+          title: 'MCP server tools',
+          subtitle:
+              'Merge tools from a Streamable-HTTP MCP server into chat completions.',
+          value: cfg.mcpEnabled,
+          onChanged: notifier.setMcpEnabled,
+        ),
+        const SizedBox(height: Spacing.sm),
+        ConduitCard(
+          child: Padding(
+            padding: const EdgeInsets.all(Spacing.md),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ConduitInput(
+                  label: 'MCP server URL',
+                  hint: 'https://your-mcp-server/mcp',
+                  controller: _mcpUrlController,
+                  keyboardType: TextInputType.url,
+                  textInputAction: TextInputAction.next,
+                  onSubmitted: notifier.setMcpServerUrl,
+                ),
+                const SizedBox(height: Spacing.md),
+                ConduitInput(
+                  label: 'MCP bearer token (optional)',
+                  controller: _mcpTokenController,
+                  obscureText: _obscureMcpToken,
+                  textInputAction: TextInputAction.done,
+                  onSubmitted: notifier.setMcpBearerToken,
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _obscureMcpToken
+                          ? UiUtils.platformIcon(
+                              ios: CupertinoIcons.eye,
+                              android: Icons.visibility,
+                            )
+                          : UiUtils.platformIcon(
+                              ios: CupertinoIcons.eye_slash,
+                              android: Icons.visibility_off,
+                            ),
+                      color: theme.iconSecondary,
+                      size: IconSize.medium,
+                    ),
+                    onPressed: () =>
+                        setState(() => _obscureMcpToken = !_obscureMcpToken),
+                  ),
+                ),
+                const SizedBox(height: Spacing.md),
+                Row(
+                  children: [
+                    Expanded(
+                      child: ConduitButton(
+                        text: 'Save MCP server',
+                        onPressed: () async {
+                          final messenger = ScaffoldMessenger.maybeOf(context);
+                          await notifier.setMcpServerUrl(_mcpUrlController.text);
+                          await notifier.setMcpBearerToken(
+                            _mcpTokenController.text,
+                          );
+                          if (!mounted || messenger == null) return;
+                          messenger.showSnackBar(
+                            const SnackBar(
+                              content: Text('MCP server saved'),
+                              duration: Duration(seconds: 2),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        settingsSectionGap,
         SettingsSectionHeader(title: 'TTS defaults'),
         const SizedBox(height: Spacing.sm),
         ConduitCard(
@@ -245,6 +344,16 @@ class _GatewaySettingsPageState extends ConsumerState<GatewaySettingsPage> {
         ),
         settingsSectionGap,
         SettingsSectionHeader(title: 'Voice call mode'),
+        const SizedBox(height: Spacing.sm),
+        _buildToggleTile(
+          context: context,
+          icon: Icons.graphic_eq,
+          title: 'Realtime (Gemini Live)',
+          subtitle:
+              'Full-duplex voice call — audio streams both ways over one connection instead of the STT/LLM/TTS pipeline below. Uses the call system prompt as its system instruction.',
+          value: cfg.realtimeEnabled,
+          onChanged: notifier.setRealtimeEnabled,
+        ),
         const SizedBox(height: Spacing.sm),
         _buildToggleTile(
           context: context,

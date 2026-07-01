@@ -1,18 +1,31 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/providers/app_providers.dart';
 import '../audio/gateway_elevenlabs_tts_client.dart';
 import '../audio/gateway_stt_client.dart';
 import '../audio/gateway_tts_client.dart';
 import '../completions/gateway_completions_client.dart';
 import '../config/gateway_providers.dart';
 import '../sync/owui_mirror_providers.dart';
+import '../tools/gateway_tool_registry.dart';
 import '../transport/gateway_client.dart';
 import 'gateway_inference_router.dart';
+
+final gatewayToolRegistryProvider = Provider<GatewayToolRegistry>((ref) {
+  final registry = GatewayToolRegistry();
+  ref.onDispose(registry.dispose);
+  return registry;
+});
 
 final gatewayCompletionsClientProvider = Provider<GatewayCompletionsClient>((
   ref,
 ) {
-  return GatewayCompletionsClient(ref.read(gatewayClientProvider));
+  return GatewayCompletionsClient(
+    ref.read(gatewayClientProvider),
+    toolRegistry: ref.read(gatewayToolRegistryProvider),
+    owuiBaseUrl: () => ref.read(apiServiceProvider)?.baseUrl,
+    owuiAuthToken: () => ref.read(apiServiceProvider)?.authToken,
+  );
 });
 
 final gatewaySttClientProvider = Provider<GatewaySttClient>((ref) {
@@ -21,9 +34,6 @@ final gatewaySttClientProvider = Provider<GatewaySttClient>((ref) {
 
 final gatewayElevenLabsClientProvider =
     Provider<GatewayElevenLabsTtsClient>((ref) {
-      // Rebuild on config changes so a refreshed API key / base URL / voice
-      // takes effect on the next WS open. The previous ref.read froze the
-      // first-launch (empty-key) config forever.
       return GatewayElevenLabsTtsClient(
         config: ref.watch(gatewayConfigProvider),
       );

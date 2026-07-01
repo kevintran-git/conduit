@@ -14,7 +14,12 @@ class GatewayConfig {
     required this.ttsModel,
     required this.ttsVoice,
     required this.voiceManualMode,
+    required this.realtimeEnabled,
     this.callSystemPrompt,
+    this.mcpEnabled = false,
+    this.mcpServerUrl = '',
+    this.mcpBearerToken = '',
+    this.statsToolEnabled = false,
   });
 
   /// Default base URL — the user's own OpenAI-compatible gateway. The user
@@ -37,7 +42,12 @@ class GatewayConfig {
     ttsModel: defaultTtsModel,
     ttsVoice: defaultTtsVoice,
     voiceManualMode: false,
+    realtimeEnabled: false,
     callSystemPrompt: null,
+    mcpEnabled: false,
+    mcpServerUrl: '',
+    mcpBearerToken: '',
+    statsToolEnabled: false,
   );
 
   final String baseUrl;
@@ -53,11 +63,21 @@ class GatewayConfig {
   /// Default false: VAD with manual override (press to suppress).
   final bool voiceManualMode;
 
+  // Switches the call launcher from the STT/LLM/TTS pipeline to the full-duplex Gemini Live session. [fact]
+  final bool realtimeEnabled;
+
   /// Optional system prompt injected at the start of every voice call turn
   /// when the Open WebUI server has not already provided one. Use this to
   /// instruct the model to keep replies short, avoid markdown, etc.
   /// Null / empty = no injection (model uses its own defaults).
   final String? callSystemPrompt;
+
+  final bool mcpEnabled;
+  final String mcpServerUrl;
+  final String mcpBearerToken;
+
+  // Backs the "get_chat_usage_stats" tool via OWUI's GET /api/v1/chats/stats/usage. [fact]
+  final bool statsToolEnabled;
 
   /// True when any service is enabled — used by shim points as a fast-path
   /// short-circuit. Returns false in the common (gateway-off) case so the
@@ -79,7 +99,12 @@ class GatewayConfig {
     String? ttsModel,
     String? ttsVoice,
     bool? voiceManualMode,
+    bool? realtimeEnabled,
     Object? callSystemPrompt = _keep,
+    bool? mcpEnabled,
+    String? mcpServerUrl,
+    String? mcpBearerToken,
+    bool? statsToolEnabled,
   }) {
     return GatewayConfig(
       baseUrl: baseUrl ?? this.baseUrl,
@@ -91,9 +116,14 @@ class GatewayConfig {
       ttsModel: ttsModel ?? this.ttsModel,
       ttsVoice: ttsVoice ?? this.ttsVoice,
       voiceManualMode: voiceManualMode ?? this.voiceManualMode,
+      realtimeEnabled: realtimeEnabled ?? this.realtimeEnabled,
       callSystemPrompt: callSystemPrompt is _Sentinel
           ? this.callSystemPrompt
           : callSystemPrompt as String?,
+      mcpEnabled: mcpEnabled ?? this.mcpEnabled,
+      mcpServerUrl: mcpServerUrl ?? this.mcpServerUrl,
+      mcpBearerToken: mcpBearerToken ?? this.mcpBearerToken,
+      statsToolEnabled: statsToolEnabled ?? this.statsToolEnabled,
     );
   }
 
@@ -112,7 +142,12 @@ class GatewayConfig {
         other.ttsModel == ttsModel &&
         other.ttsVoice == ttsVoice &&
         other.voiceManualMode == voiceManualMode &&
-        other.callSystemPrompt == callSystemPrompt;
+        other.realtimeEnabled == realtimeEnabled &&
+        other.callSystemPrompt == callSystemPrompt &&
+        other.mcpEnabled == mcpEnabled &&
+        other.mcpServerUrl == mcpServerUrl &&
+        other.mcpBearerToken == mcpBearerToken &&
+        other.statsToolEnabled == statsToolEnabled;
   }
 
   @override
@@ -126,7 +161,12 @@ class GatewayConfig {
     ttsModel,
     ttsVoice,
     voiceManualMode,
+    realtimeEnabled,
     callSystemPrompt,
+    mcpEnabled,
+    mcpServerUrl,
+    mcpBearerToken,
+    statsToolEnabled,
   );
 }
 

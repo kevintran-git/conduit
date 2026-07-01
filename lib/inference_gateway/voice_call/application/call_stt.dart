@@ -2,10 +2,9 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:record/record.dart';
-import 'package:speech_to_text/speech_recognition_result.dart';
-import 'package:speech_to_text/speech_to_text.dart';
 
 import '../../../core/utils/debug_logger.dart';
+import '../../../features/chat/services/native_stt_service.dart';
 import '../../audio/gateway_streaming_stt_client.dart';
 import '../../config/gateway_config.dart';
 
@@ -48,19 +47,11 @@ abstract class CallStt {
   set manualEosOnly(bool value);
 }
 
-// ===========================================================================
-// On-device STT — wraps the speech_to_text package.
-// ===========================================================================
 
-/// Wraps the platform STT (Apple / Android speech recognizer). Manages its
-/// own mic and VAD — `pauseFor` triggers the platform's end-of-speech
-/// detector. In [manualEosOnly] mode `pauseFor` is set to a long ceiling
-/// so only an explicit [requestFinal] commits.
 class DeviceCallStt implements CallStt {
   DeviceCallStt({required this.pauseFor, required bool manualEosOnly})
       : _manualEosOnly = manualEosOnly;
 
-  /// Auto-EOS silence threshold when [manualEosOnly] is false.
   final Duration pauseFor;
 
   bool _manualEosOnly;
@@ -69,105 +60,136 @@ class DeviceCallStt implements CallStt {
   @override
   set manualEosOnly(bool value) => _manualEosOnly = value;
 
-  final SpeechToText _speech = SpeechToText();
+  final NativeSttService _stt = NativeSttService();
   final StreamController<SttEvent> _events =
       StreamController<SttEvent>.broadcast();
-  bool _initialized = false;
+  StreamSubscription<NativeSttEvent>? _sttSub;
+  Timer? _settle;
   bool _disposed = false;
+  bool _stopping = false;
 
-  /// Finalized segments for the current turn, joined with spaces. Survives
-  /// the native recognizer resetting/restarting between sentences.
+  // NativeSttService accumulation resets on every startListening, so a manual-mode re-arm folds the dying session's text into _committed before _text restarts. [fact]
   String _committed = '';
+  String _text = '';
 
-  /// Latest `recognizedWords` for the in-progress segment (not yet folded
-  /// into [_committed]).
-  String _segment = '';
-
-  /// Set by [requestFinal] (user tapped the mic). Distinguishes a
-  /// user-requested final from Android's per-segment auto-finals so the
-  /// former ends the turn even in [manualEosOnly] mode.
   bool _finalRequested = false;
-
-  /// True while a manual-mode re-arm is in flight, so the extra final that
-  /// `_speech.stop()` flushes doesn't trigger a second restart.
+  bool _turnDone = false;
   bool _restarting = false;
 
-  static const Duration _manualPauseCeiling = Duration(minutes: 5);
-
-  /// Brief settle before re-listening: the plugin's `stop()` tears the
-  /// native recognizer down on a short delay, and creating a new one before
-  /// that completes can reuse the dying instance. This is a teardown settle,
-  /// not an EOS timeout.
   static const Duration _restartSettle = Duration(milliseconds: 80);
 
   @override
   Stream<SttEvent> get events => _events.stream;
 
-  /// [_committed] + [_segment], collapsed to a single trimmed string.
   String get _combined {
     final c = _committed.trim();
-    final s = _segment.trim();
-    if (c.isEmpty) return s;
-    if (s.isEmpty) return c;
-    return '$c $s';
+    final t = _text.trim();
+    if (c.isEmpty) return t;
+    if (t.isEmpty) return c;
+    return '$c $t';
   }
 
   @override
   Future<void> start() async {
     if (_disposed) throw StateError('DeviceCallStt was disposed');
-    if (!_initialized) {
-      final ok = await _speech.initialize(
-        onError: (e) {
-          DebugLogger.warning(
-            'device-stt-error',
-            scope: 'call/stt',
-            data: {'error': e.errorMsg},
-          );
-        },
-      );
-      if (!ok || !_speech.isAvailable) {
-        throw StateError('On-device speech recognition is not available.');
-      }
-      _initialized = true;
-    }
-
     _committed = '';
-    _segment = '';
+    _text = '';
     _finalRequested = false;
+    _turnDone = false;
     await _listenOnce();
   }
 
   Future<void> _listenOnce() async {
-    await _speech.listen(
-      onResult: _onResult,
-      listenOptions: SpeechListenOptions(
-        listenMode: ListenMode.dictation,
-        cancelOnError: false,
-        partialResults: true,
-        autoPunctuation: true,
-        enableHapticFeedback: false,
-        pauseFor: _manualEosOnly ? _manualPauseCeiling : pauseFor,
-      ),
+    final stream = await _stt.startListening(
+      emitPartialResults: true,
+      accumulateResults: true,
     );
+    _sttSub = stream.listen(
+      _onEvent,
+      onError: (Object error, StackTrace stackTrace) {
+        DebugLogger.warning(
+          'device-stt-error',
+          scope: 'call/stt',
+          data: {'error': error.toString()},
+        );
+      },
+      onDone: _onSessionEnded,
+      cancelOnError: false,
+    );
+  }
+
+  void _onEvent(NativeSttEvent event) {
+    if (_disposed || _events.isClosed || _turnDone) return;
+    switch (event.type) {
+      case 'result':
+        final text = event.text;
+        if (text == null) return;
+        _text = text;
+        if (event.isFinal && (_finalRequested || !_manualEosOnly)) {
+          _commitFinal();
+        } else {
+          _emit(_combined, false);
+          if (!_manualEosOnly) _armSettle();
+        }
+      case 'error':
+        DebugLogger.warning(
+          'device-stt-error',
+          scope: 'call/stt',
+          data: {'message': event.message, 'code': event.code},
+        );
+        _commitFinal();
+      case 'status':
+      case 'done':
+        break;
+    }
+  }
+
+  void _onSessionEnded() {
+    if (_disposed || _turnDone || _stopping || _restarting) return;
+    if (_manualEosOnly && !_finalRequested) {
+      unawaited(_restart());
+    } else {
+      _commitFinal();
+    }
+  }
+
+  void _armSettle() {
+    _settle?.cancel();
+    _settle = Timer(pauseFor, () {
+      if (_disposed || _turnDone) return;
+      _commitFinal();
+    });
+  }
+
+  void _commitFinal() {
+    if (_turnDone) return;
+    _turnDone = true;
+    _settle?.cancel();
+    _settle = null;
+    _emit(_combined.trim(), true);
   }
 
   @override
   Future<void> requestFinal() async {
     _finalRequested = true;
-    try {
-      // .stop() flushes a finalResult callback even in manual mode.
-      await _speech.stop();
-    } catch (_) {}
+    _commitFinal();
   }
 
   @override
   Future<void> stop() async {
+    _stopping = true;
+    _settle?.cancel();
+    _settle = null;
     _committed = '';
-    _segment = '';
+    _text = '';
     _finalRequested = false;
+    _turnDone = false;
+    await _sttSub?.cancel();
+    _sttSub = null;
     try {
-      await _speech.cancel();
+      await _stt.stopListening();
     } catch (_) {}
+    _stopping = false;
   }
 
   @override
@@ -178,82 +200,21 @@ class DeviceCallStt implements CallStt {
     if (!_events.isClosed) await _events.close();
   }
 
-  void _onResult(SpeechRecognitionResult result) {
-    if (_disposed || _events.isClosed) return;
-    final words = result.recognizedWords;
-
-    if (!result.finalResult) {
-      // Partials normally build on the current segment. If the recognizer
-      // silently dropped the prior hypothesis and started fresh, fold the
-      // prior segment so its words aren't lost when this partial overwrites.
-      if (_isSegmentReset(words)) _commitSegment();
-      _segment = words;
-      _emit(_combined, false);
-      return;
-    }
-
-    // A final: Android's per-segment auto-final, an explicit requestFinal,
-    // or a genuine end of speech. Fold the segment into the accumulator.
-    if (_restarting) return; // re-entrant flush from our own stop(); ignore.
-    _segment = words;
-    _commitSegment();
-    final full = _committed.trim();
-
-    if (_finalRequested || !_manualEosOnly) {
-      // End the turn with everything heard so far.
-      _emit(full, true);
-      _resetTurn();
-      return;
-    }
-
-    // Manual mode and the user hasn't tapped yet: keep the turn alive.
-    // Surface the accumulated text as a partial so nothing disappears, then
-    // re-arm the recognizer for the next sentence.
-    _emit(full, false);
-    unawaited(_restart());
-  }
-
-  bool _isSegmentReset(String words) {
-    final prev = _segment.trim();
-    final next = words.trim();
-    if (prev.isEmpty || next.isEmpty) return false;
-    if (next.startsWith(prev) || prev.startsWith(next)) return false;
-    final prevWords = prev.split(RegExp(r'\s+'));
-    if (prevWords.length < 3) return false;
-    return !next.toLowerCase().startsWith(prevWords.first.toLowerCase());
-  }
-
-  void _commitSegment() {
-    final s = _segment.trim();
-    _segment = '';
-    if (s.isEmpty) return;
-    _committed = _committed.trim().isEmpty ? s : '${_committed.trim()} $s';
-  }
-
-  void _resetTurn() {
-    _committed = '';
-    _segment = '';
-    _finalRequested = false;
-  }
-
   void _emit(String text, bool isFinal) {
     if (_disposed || _events.isClosed) return;
     _events.add(SttEvent(text: text, isFinal: isFinal));
   }
 
-  /// Manual-mode re-arm after Android finalized a segment. On failure we
-  /// emit what we have as a real final rather than stranding the turn with
-  /// a dead mic.
   Future<void> _restart() async {
-    if (_disposed || _restarting) return;
+    if (_disposed || _restarting || _turnDone) return;
     _restarting = true;
     try {
-      try {
-        await _speech.stop();
-      } catch (_) {}
-      if (_disposed) return;
+      _committed = _combined;
+      _text = '';
+      await _sttSub?.cancel();
+      _sttSub = null;
       await Future<void>.delayed(_restartSettle);
-      if (_disposed) return;
+      if (_disposed || _turnDone) return;
       await _listenOnce();
     } catch (error) {
       DebugLogger.warning(
@@ -261,17 +222,13 @@ class DeviceCallStt implements CallStt {
         scope: 'call/stt',
         data: {'error': error.toString()},
       );
-      _emit(_committed.trim(), true);
-      _resetTurn();
+      _commitFinal();
     } finally {
       _restarting = false;
     }
   }
 }
 
-// ===========================================================================
-// Gateway STT — owns the mic and the streaming WS to api.kvt.codes.
-// ===========================================================================
 
 /// Captures 16 kHz / 16-bit / mono PCM and streams it to the gateway's
 /// `/ws/audio/transcribe` endpoint. Server `is_final` events become final
@@ -328,7 +285,6 @@ class GatewayCallStt implements CallStt {
         numChannels: 1,
         echoCancel: true,
         noiseSuppress: true,
-        // 50 ms PCM frames per the gateway's low-latency spec.
         streamBufferSize: 1600,
       ),
     );

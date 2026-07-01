@@ -18,18 +18,21 @@ class GatewayConfigNotifier extends Notifier<GatewayConfig> {
   GatewayConfig build() {
     _storage = ref.read(gatewayStorageProvider);
     final initial = _storage.loadSync(apiKey: '');
-    unawaited(_hydrateApiKey());
+    unawaited(_hydrateSecureFields());
     return initial;
   }
 
-  Future<void> _hydrateApiKey() async {
-    final key = await _storage.loadApiKey();
-    // The provider can be disposed while the secure-storage read is in flight
-    // (e.g. short-lived test containers, or the user signing out). Touching
-    // `state` after disposal throws, so bail if we're no longer mounted.
+  Future<void> _hydrateSecureFields() async {
+    final apiKey = await _storage.loadApiKey();
+    final mcpBearerToken = await _storage.loadMcpBearerToken();
     if (!ref.mounted) return;
-    if (key.isEmpty && state.apiKey.isEmpty) return;
-    state = state.copyWith(apiKey: key);
+    if (apiKey.isEmpty &&
+        state.apiKey.isEmpty &&
+        mcpBearerToken.isEmpty &&
+        state.mcpBearerToken.isEmpty) {
+      return;
+    }
+    state = state.copyWith(apiKey: apiKey, mcpBearerToken: mcpBearerToken);
   }
 
   Future<void> setBaseUrl(String value) async {
@@ -88,12 +91,39 @@ class GatewayConfigNotifier extends Notifier<GatewayConfig> {
     await _storage.saveVoiceManualMode(value);
   }
 
+  Future<void> setRealtimeEnabled(bool value) async {
+    state = state.copyWith(realtimeEnabled: value);
+    await _storage.saveRealtimeEnabled(value);
+  }
+
   Future<void> setCallSystemPrompt(String? value) async {
     final trimmed = value?.trim();
     state = state.copyWith(
       callSystemPrompt: (trimmed == null || trimmed.isEmpty) ? null : trimmed,
     );
     await _storage.saveCallSystemPrompt(trimmed);
+  }
+
+  Future<void> setMcpEnabled(bool value) async {
+    state = state.copyWith(mcpEnabled: value);
+    await _storage.saveMcpEnabled(value);
+  }
+
+  Future<void> setMcpServerUrl(String value) async {
+    final trimmed = value.trim();
+    state = state.copyWith(mcpServerUrl: trimmed);
+    await _storage.saveMcpServerUrl(trimmed);
+  }
+
+  Future<void> setMcpBearerToken(String value) async {
+    final trimmed = value.trim();
+    state = state.copyWith(mcpBearerToken: trimmed);
+    await _storage.saveMcpBearerToken(trimmed);
+  }
+
+  Future<void> setStatsToolEnabled(bool value) async {
+    state = state.copyWith(statsToolEnabled: value);
+    await _storage.saveStatsToolEnabled(value);
   }
 
   String _stripTrailingSlash(String url) {
@@ -132,4 +162,9 @@ final gatewayTtsActiveProvider = Provider<bool>((ref) {
 final gatewayVoiceActiveProvider = Provider<bool>((ref) {
   final cfg = ref.watch(gatewayConfigProvider);
   return cfg.voiceEnabled && cfg.hasCredentials;
+});
+
+final gatewayRealtimeActiveProvider = Provider<bool>((ref) {
+  final cfg = ref.watch(gatewayConfigProvider);
+  return cfg.realtimeEnabled && cfg.hasCredentials;
 });

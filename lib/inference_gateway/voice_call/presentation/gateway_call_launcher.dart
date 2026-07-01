@@ -9,7 +9,9 @@ import '../../../features/auth/providers/unified_auth_providers.dart';
 import '../../../features/chat/voice_call/presentation/voice_call_launcher.dart';
 import '../../config/gateway_providers.dart';
 import '../application/call_session.dart';
+import '../application/realtime_call_session.dart';
 import 'gateway_call_overlay.dart';
+import 'gateway_realtime_call_overlay.dart';
 
 /// Drop-in replacement for upstream's [VoiceCallLauncher] that inserts the
 /// call surface as an [OverlayEntry] over the chat screen instead of pushing
@@ -28,6 +30,7 @@ class GatewayCallLauncher extends VoiceCallLauncher {
   /// the launcher (not the controller) because the OverlayEntry is a
   /// widget-tree concern, not an inference concern.
   OverlayEntry? _entry;
+  bool _realtimeActive = false;
 
   @override
   Future<void> launch({required bool startNewConversation}) async {
@@ -35,19 +38,19 @@ class GatewayCallLauncher extends VoiceCallLauncher {
     if (navState != AuthNavigationState.authenticated) {
       throw StateError('Sign in to start a voice call.');
     }
-    // Preflight: refuse to open the overlay if the gateway voice path isn't
-    // usable. Without this the call surface opens then immediately flips
-    // to an error stage, which reads as a crash to the user.
     final cfg = _ref.read(gatewayConfigProvider);
-    if (!cfg.voiceEnabled || !cfg.hasCredentials) {
+    final realtime = cfg.realtimeEnabled;
+    if (realtime) {
+      if (!cfg.hasCredentials) {
+        throw StateError('Voice gateway is not configured.');
+      }
+    } else if (!cfg.voiceEnabled || !cfg.hasCredentials) {
       throw StateError('Voice gateway is not configured.');
     }
-    if (_ref.read(selectedModelProvider) == null) {
+    if (!realtime && _ref.read(selectedModelProvider) == null) {
       throw StateError('Choose a model before starting a voice call.');
     }
     if (_entry != null) {
-      // Already in a call — bringing it forward is a no-op for the overlay
-      // model since it's already on top of the chat.
       return;
     }
 
@@ -62,29 +65,31 @@ class GatewayCallLauncher extends VoiceCallLauncher {
     }
     FocusScope.of(context).unfocus();
 
-    // navigatorKey.currentContext sits at the Navigator widget itself, which
-    // is above its own Overlay — so Overlay.of from there finds nothing.
-    // Use the Navigator's state directly: it exposes the internal Overlay.
     final overlay = NavigationService.navigatorKey.currentState?.overlay;
     if (overlay == null) {
       throw StateError('Overlay not available.');
     }
     final completer = Completer<void>();
+    _realtimeActive = realtime;
 
     void close() {
       if (_entry == null) return;
       _entry!.remove();
       _entry = null;
-      // Tearing down the controller triggers all its onDispose hooks
-      // (closes WS, releases mic, stops TTS).
-      _ref.invalidate(callSessionProvider);
+      if (_realtimeActive) {
+        _ref.invalidate(realtimeCallSessionProvider);
+      } else {
+        _ref.invalidate(callSessionProvider);
+      }
       if (!completer.isCompleted) completer.complete();
     }
 
     _entry = OverlayEntry(
       builder: (_) => Align(
         alignment: Alignment.bottomCenter,
-        child: GatewayCallOverlay(onClose: close),
+        child: realtime
+            ? GatewayRealtimeCallOverlay(onClose: close)
+            : GatewayCallOverlay(onClose: close),
       ),
     );
     overlay.insert(_entry!);
