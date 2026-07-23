@@ -171,6 +171,7 @@ import 'core/services/background_streaming_handler.dart';
 import 'features/profile/widgets/account_actions.dart';
 import 'features/profile/widgets/account_sheet.dart'
     show EditDirectConnectionRequest, showAccountSheet;
+import 'inference_gateway/gateway_bootstrap.dart';
 
 const bool _enableFlutterDriverExtension = bool.fromEnvironment(
   'ENABLE_FLUTTER_DRIVER_EXTENSION',
@@ -526,6 +527,7 @@ void main() {
           realtimeWebRtcMediaFactoryProvider.overrideWithValue(
             () => _hasRealtimeAudio ? WebRtcRealtimeMedia() : null,
           ),
+          ...gatewayProviderOverrides(),
         ],
       );
       // CarPlay can cold-launch Conduit without a visible Flutter scene, so
