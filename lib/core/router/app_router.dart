@@ -45,6 +45,7 @@ import '../../features/direct_connections/models/direct_connection_profile.dart'
 import '../../features/direct_connections/providers/direct_connection_providers.dart';
 import '../../features/direct_connections/views/direct_connection_editor_page.dart';
 import '../../features/direct_connections/views/direct_connections_page.dart';
+import '../../inference_gateway/router/gateway_routes.dart';
 import '../../l10n/app_localizations.dart';
 import '../models/server_config.dart';
 
@@ -244,10 +245,7 @@ class RouterNotifier extends ChangeNotifier {
 
     final activeServer = activeServerAsync.asData?.value;
     final hasActiveServer = activeServer != null;
-    // A preferred Direct backend is usable only while at least one validated,
-    // enabled profile has resolved. With an authenticated OpenWebUI session we
-    // can fall back to mixed mode; otherwise recover Direct setup instead of
-    // leaving the user in a model-less chat.
+
     if (prefersDirect &&
         !directUsable &&
         (!hasActiveServer || authState != AuthNavigationState.authenticated)) {
@@ -619,6 +617,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         ),
       ),
     ),
+    ...gatewayRoutes(),
     GoRoute(
       path: Routes.notificationSettings,
       name: RouteNames.notificationSettings,

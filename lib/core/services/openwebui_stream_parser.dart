@@ -214,6 +214,8 @@ Iterable<OpenWebUIStreamUpdate> parseOpenWebUIParsedPayload(
 }
 
 OpenWebUIEventUpdate? _eventUpdateFromMap(Map<dynamic, dynamic> raw) {
+  if (raw['choices'] is List) return null;
+
   final type = raw['type']?.toString();
   if (type == null || type.isEmpty || type.startsWith('response.')) {
     return null;

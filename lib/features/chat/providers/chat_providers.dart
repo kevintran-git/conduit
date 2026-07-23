@@ -73,6 +73,7 @@ import '../services/chat_transport_dispatch.dart';
 import '../services/chat_history_reader.dart';
 import '../services/file_attachment_service.dart';
 import '../services/reviewer_mode_service.dart';
+import '../../../inference_gateway/sync/gateway_chat_hooks.dart';
 
 part 'chat_capability_providers.dart';
 part 'chat_composer_providers.dart';
@@ -1607,6 +1608,11 @@ class ChatMessagesNotifier extends Notifier<List<ChatMessage>>
   HermesRunKey? _coldHermesRecoveryKey;
   String? _coldHermesRecoveryMessageId;
 
+  final StreamController<String> _rawStreamingContentController =
+      StreamController<String>.broadcast();
+  Stream<String> get rawStreamingContentStream =>
+      _rawStreamingContentController.stream;
+
   bool _initialized = false;
   bool _disposed = false;
 
@@ -1715,8 +1721,10 @@ class ChatMessagesNotifier extends Notifier<List<ChatMessage>>
         _cancelColdHermesRecovery();
 
         if (next != null) {
+          final seededMessages =
+              gatewaySeedMessagesForConversation(ref, next) ?? next.messages;
           final nextMessages = _restoreLiveTransportRunState(
-            _preserveFreshLocalAssistantState(next.messages),
+            _preserveFreshLocalAssistantState(seededMessages),
             next,
             settleOrphanedDirect: true,
           );
@@ -1787,6 +1795,8 @@ class ChatMessagesNotifier extends Notifier<List<ChatMessage>>
 
         _conversationListener?.close();
         _conversationListener = null;
+
+        unawaited(_rawStreamingContentController.close());
       });
     }
 
@@ -2124,6 +2134,9 @@ class ChatMessagesNotifier extends Notifier<List<ChatMessage>>
     if (serverMessages.isEmpty && state.isNotEmpty) {
       return false;
     }
+    if (gatewayShouldRejectServerAdoption(ref, serverMessages, state)) {
+      return false;
+    }
     if (_messagesDifferByCoreFields(serverMessages, state)) {
       return true;
     }
@@ -2397,6 +2410,12 @@ class ChatMessagesNotifier extends Notifier<List<ChatMessage>>
         _dropStreamingTransportState(source: 'server adoption from $source');
       }
     }
+
+    gatewayPersistMessages(
+      ref,
+      ref.read(activeConversationProvider)?.id,
+      serverMessages,
+    );
 
     DebugLogger.log(
       'Adopted server conversation snapshot from $source '
@@ -4005,6 +4024,10 @@ class ChatMessagesNotifier extends Notifier<List<ChatMessage>>
       return;
     }
 
+    if (activeOpenWebUiChatIdForMutation(ref, owner) == null) {
+      return;
+    }
+
     // Rebase the entire active branch before attaching live deltas. Copying
     // only the assistant body leaves stale/missing user and assistant turns
     // around it after a DB-first reopen.
@@ -5272,6 +5295,10 @@ class ChatMessagesNotifier extends Notifier<List<ChatMessage>>
     _markStreamingBufferChanged();
     _recordStreamingChunk(content);
 
+    if (!_rawStreamingContentController.isClosed) {
+      _rawStreamingContentController.add(_streamingBuffer.toString());
+    }
+
     _scheduleStreamingContentUpdate();
     _touchStreamingActivity();
   }
@@ -5772,6 +5799,9 @@ class ChatMessagesNotifier extends Notifier<List<ChatMessage>>
     _syncConversationStateAfterStreamingUpdate();
     if (persistTurn) {
       _persistCompletedTurn();
+      final completedConversationId = ref.read(activeConversationProvider)?.id;
+      gatewayPersistMessages(ref, completedConversationId, state);
+      gatewayMarkConversationDirty(ref, completedConversationId);
     }
   }
 
@@ -9071,7 +9101,7 @@ Future<void> regenerateMessage(
         ref.read(temporaryChatEnabledProvider);
     final requestMessages = _buildChatCompletionMessages(
       conversationMessages: conversationMessages,
-      isTemporary: isTemporary,
+      isTemporary: gatewaySendFullHistory(ref, isTemporary),
     );
     if (!ownsCurrentPreparationState()) return;
     requireRegenerationOwner();
@@ -9685,7 +9715,7 @@ Future<void> runQueuedCompletion(
     messages: messages,
     conversationSystemPrompt: activeConversation.systemPrompt,
     userSystemPrompt: userSystemPrompt,
-    isTemporary: isTemporary,
+    isTemporary: gatewaySendFullHistory(ref, isTemporary),
   );
   requireActiveOwner();
 
@@ -9942,7 +9972,7 @@ Future<void> runHeadlessCompletion(
     messages: messages,
     conversationSystemPrompt: conversation.systemPrompt,
     userSystemPrompt: userSystemPrompt,
-    isTemporary: false,
+    isTemporary: gatewaySendFullHistory(ref, false),
   );
   requireCurrentOwner();
 
@@ -16984,7 +17014,7 @@ Future<void> _sendMessageInternal(
       ref.read(temporaryChatEnabledProvider);
   final requestMessages = _buildChatCompletionMessages(
     conversationMessages: conversationMessages,
-    isTemporary: isTemporary,
+    isTemporary: gatewaySendFullHistory(ref, isTemporary),
   );
 
   // Check feature toggles for API (gated by server availability)
@@ -17312,6 +17342,9 @@ String chatErrorContentForException(Object e) {
     return 'This conversation is no longer available.';
   }
   if (e is HermesAttachmentsUnsupportedException) return e.message;
+
+  final gatewayMsg = gatewayErrorMessage(e);
+  if (gatewayMsg != null) return gatewayMsg;
   if (e is HermesChatInputException) return e.message;
   if (e is HermesLocalDocumentException) return e.message;
   if (e is DirectChatInputException) return e.message;

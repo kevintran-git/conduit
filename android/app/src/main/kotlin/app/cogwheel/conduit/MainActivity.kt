@@ -516,6 +516,7 @@ class MainActivity : FlutterActivity() {
     private lateinit var backgroundStreamingHandler: BackgroundStreamingHandler
     private lateinit var nativeSttBridge: NativeSttBridge
     private lateinit var nativeTtsBridge: NativeTtsBridge
+    private lateinit var callPlaybackBridge: CallPlaybackBridge
 
     override fun onCreate(savedInstanceState: Bundle?) {
         reconcileInterruptedShareImportIfNeeded()
@@ -590,6 +591,8 @@ class MainActivity : FlutterActivity() {
         nativeSttBridge.setup(flutterEngine)
         nativeTtsBridge = NativeTtsBridge(this)
         nativeTtsBridge.setup(flutterEngine)
+        callPlaybackBridge = CallPlaybackBridge()
+        callPlaybackBridge.setup(flutterEngine)
 
         methodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, ASSISTANT_CHANNEL)
         shareChannel = MethodChannel(
@@ -1701,6 +1704,9 @@ class MainActivity : FlutterActivity() {
         }
         if (::nativeTtsBridge.isInitialized) {
             nativeTtsBridge.dispose()
+        }
+        if (::callPlaybackBridge.isInitialized) {
+            callPlaybackBridge.dispose()
         }
         if (::backgroundStreamingHandler.isInitialized) {
             backgroundStreamingHandler.cleanup()

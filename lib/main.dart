@@ -48,6 +48,7 @@ import 'core/services/quick_actions_service.dart';
 import 'core/providers/app_startup_providers.dart';
 import 'features/notifications/services/local_notification_service.dart';
 import 'shared/widgets/sign_out_options_dialog.dart';
+import 'inference_gateway/gateway_bootstrap.dart';
 
 const bool _enableFlutterDriverExtension = bool.fromEnvironment(
   'ENABLE_FLUTTER_DRIVER_EXTENSION',
@@ -244,6 +245,7 @@ void main() {
           requestCompletionRunnerProvider.overrideWith(
             (ref) => ref.watch(chatRequestCompletionRunnerProvider),
           ),
+          ...gatewayProviderOverrides(),
         ],
       );
       // CarPlay can cold-launch Conduit without a visible Flutter scene, so
@@ -974,7 +976,9 @@ class _ConduitAppState extends ConsumerState<ConduitApp> {
           return Theme(
             data: materialTheme,
             child: ReleaseNotesCoordinator(
-              child: _KeyboardDismissOnScroll(child: safeChild),
+              child: _KeyboardDismissOnScroll(
+                child: wrapWithGateway(safeChild),
+              ),
             ),
           );
         },

@@ -53,8 +53,10 @@ android {
 
     buildTypes {
         getByName("release") {
-            if (keystorePropertiesFile.exists()) {
-                signingConfig = signingConfigs.getByName("release")
+            signingConfig = if (keystorePropertiesFile.exists()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
             }
             isMinifyEnabled = true
             isShrinkResources = true
@@ -64,7 +66,7 @@ android {
             )
         }
         getByName("debug") {
-            // signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("debug")
             applicationIdSuffix = ".debug"
         }
     }

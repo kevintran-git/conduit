@@ -26,6 +26,7 @@ import '../../../core/utils/user_avatar_utils.dart';
 import '../../../shared/widgets/user_avatar.dart';
 import '../widgets/profile_setting_tile.dart';
 import '../widgets/profile_text_styles.dart';
+import '../../../inference_gateway/settings/gateway_settings_page.dart';
 
 /// Profile page (You tab) showing user info and main actions
 /// Enhanced with production-grade design tokens for better cohesion
@@ -450,6 +451,7 @@ class ProfilePage extends ConsumerWidget {
           subtitle: l10n.connectOpenWebUISubtitle,
           onTap: () => context.goNamed(RouteNames.serverConnection),
         ),
+      gatewayProfileTile(context),
       _buildAboutTile(context),
     ];
   }
