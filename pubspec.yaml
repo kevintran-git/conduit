@@ -125,9 +125,17 @@ dependencies:
   quick_actions: ^1.1.0
   html_unescape: ^2.0.0
   home_widget: ^0.10.0
+  inference_kit:
+    git:
+      url: https://github.com/kevintran-git/inference_kit.git
+      ref: main
   flutter_highlight: ^0.7.0
   just_audio: ^0.10.5
   cupertino_native_better: ^2.5.2
+  pcm_call_audio:
+    git:
+      url: https://github.com/kevintran-git/pcm_call_audio.git
+      ref: main
   flutter_tex: ^5.2.6
   xterm: ^4.0.0
   web_socket: ^1.0.1
