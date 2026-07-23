@@ -95,10 +95,18 @@ dependencies:
   flutter_callkit_incoming: ^3.1.5
   quick_actions: ^1.1.0
   html_unescape: ^2.0.0
+  inference_kit:
+    git:
+      url: https://github.com/kevintran-git/inference_kit.git
+      ref: main
   home_widget: ^0.9.3
   flutter_highlight: ^0.7.0
   just_audio: ^0.10.5
   cupertino_native_better: ^1.5.4
+  pcm_call_audio:
+    git:
+      url: https://github.com/kevintran-git/pcm_call_audio.git
+      ref: main
   flutter_tex: ^5.2.6
   xterm: ^4.0.0
   web_socket: ^1.0.1
