@@ -43,6 +43,7 @@ import 'package:conduit_core/utils/user_avatar_utils.dart';
 
 import '../../../shared/widgets/user_avatar.dart';
 import '../../../shared/widgets/utility_components.dart';
+import '../../../inference_gateway/settings/gateway_settings_page.dart';
 
 /// Profile page (You tab) showing user info and main actions
 /// Enhanced with production-grade design tokens for better cohesion
@@ -516,7 +517,9 @@ class ProfilePage extends ConsumerWidget {
         ),
       ],
       const SizedBox(height: Spacing.lg),
-      InsetGroupedList(children: [_buildAboutTile(context)]),
+      InsetGroupedList(
+        children: [gatewayProfileTile(context), _buildAboutTile(context)],
+      ),
     ];
   }
 

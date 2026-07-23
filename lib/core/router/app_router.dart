@@ -55,6 +55,7 @@ import '../../features/profile/views/chat_data_controls_page.dart';
 import 'package:conduit_core/features/integrations/personal_connection_settings.dart';
 
 import '../../features/direct_connections/views/direct_mcp_server_editor_page.dart';
+import '../../inference_gateway/router/gateway_routes.dart';
 import '../../l10n/app_localizations.dart';
 
 import 'package:conduit_core/models/server_config.dart';
@@ -311,6 +312,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         ),
       ),
     ),
+    ...gatewayRoutes(),
     GoRoute(
       path: Routes.notificationSettings,
       name: RouteNames.notificationSettings,

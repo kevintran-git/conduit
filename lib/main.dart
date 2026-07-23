@@ -147,6 +147,7 @@ import 'shared/services/app_package_info.dart';
 import 'package:conduit_core/features/hermes/providers/hermes_providers.dart';
 
 import 'features/hermes/services/hermes_dashboard_rest_bridge.dart';
+import 'inference_gateway/gateway_bootstrap.dart';
 
 const bool _enableFlutterDriverExtension = bool.fromEnvironment(
   'ENABLE_FLUTTER_DRIVER_EXTENSION',
@@ -434,6 +435,7 @@ void main() {
           voiceModePlatformProvider.overrideWithValue(
             const FlutterVoiceModePlatform(),
           ),
+          ...gatewayProviderOverrides(),
         ],
       );
       // CarPlay can cold-launch Conduit without a visible Flutter scene, so
