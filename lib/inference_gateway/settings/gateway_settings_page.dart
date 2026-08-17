@@ -1,4 +1,4 @@
-import 'package:adaptive_platform_ui/adaptive_platform_ui.dart';
+import 'package:conduit/shared/widgets/platform_ui/platform_ui.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -14,6 +14,7 @@ import '../../features/profile/widgets/settings_page_scaffold.dart';
 import '../../shared/theme/theme_extensions.dart';
 import '../../shared/utils/ui_utils.dart';
 import '../../shared/widgets/conduit_components.dart';
+import '../../shared/widgets/utility_components.dart';
 import '../config/gateway_config.dart';
 import '../config/gateway_providers.dart';
 import 'realtime_tuning_card.dart';
@@ -173,7 +174,7 @@ class _GatewaySettingsPageState extends ConsumerState<GatewaySettingsPage> {
 
     final hasCustomPrompt = (cfg.callSystemPrompt ?? '').trim().isNotEmpty;
 
-    return SettingsPageScaffold(
+    return UtilityPageScaffold.settings(
       title: 'Inference Gateway',
       children: [
         _buildIntro(context),
