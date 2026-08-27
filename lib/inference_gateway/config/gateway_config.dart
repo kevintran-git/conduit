@@ -14,6 +14,7 @@ class GatewayConfig {
     required this.ttsVoice,
     required this.voiceManualMode,
     required this.realtimeEnabled,
+    this.sttModel = '',
     this.callModel = defaultCallModel,
     this.callVoice = defaultCallVoice,
     this.callPauseToleranceMs = defaultCallPauseToleranceMs,
@@ -50,6 +51,7 @@ class GatewayConfig {
     sttEnabled: false,
     ttsEnabled: false,
     voiceEnabled: false,
+    sttModel: '',
     ttsModel: defaultTtsModel,
     ttsVoice: defaultTtsVoice,
     voiceManualMode: false,
@@ -69,6 +71,11 @@ class GatewayConfig {
   final bool sttEnabled;
   final bool ttsEnabled;
   final bool voiceEnabled;
+
+  /// `backend` from `/v1/audio/transcription/capabilities`. Empty leaves the
+  /// server on its `default_backend`.
+  final String sttModel;
+
   final String ttsModel;
   final String ttsVoice;
 
@@ -111,6 +118,7 @@ class GatewayConfig {
     bool? sttEnabled,
     bool? ttsEnabled,
     bool? voiceEnabled,
+    String? sttModel,
     String? ttsModel,
     String? ttsVoice,
     bool? voiceManualMode,
@@ -130,6 +138,7 @@ class GatewayConfig {
       sttEnabled: sttEnabled ?? this.sttEnabled,
       ttsEnabled: ttsEnabled ?? this.ttsEnabled,
       voiceEnabled: voiceEnabled ?? this.voiceEnabled,
+      sttModel: sttModel ?? this.sttModel,
       ttsModel: ttsModel ?? this.ttsModel,
       ttsVoice: ttsVoice ?? this.ttsVoice,
       voiceManualMode: voiceManualMode ?? this.voiceManualMode,
@@ -158,6 +167,7 @@ class GatewayConfig {
         other.sttEnabled == sttEnabled &&
         other.ttsEnabled == ttsEnabled &&
         other.voiceEnabled == voiceEnabled &&
+        other.sttModel == sttModel &&
         other.ttsModel == ttsModel &&
         other.ttsVoice == ttsVoice &&
         other.voiceManualMode == voiceManualMode &&
@@ -179,6 +189,7 @@ class GatewayConfig {
     sttEnabled,
     ttsEnabled,
     voiceEnabled,
+    sttModel,
     ttsModel,
     ttsVoice,
     voiceManualMode,
