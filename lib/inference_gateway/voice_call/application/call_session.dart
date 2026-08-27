@@ -354,7 +354,13 @@ class CallSession extends Notifier<CallSessionState> implements CallEngine {
 
     try {
       await _race(
-        chat.sendMessageFromService(ref, '🎙️ $text', null, null, true),
+        chat.sendMessageWithContainer(
+          ref.container,
+          '🎙️ $text',
+          null,
+          null,
+          true,
+        ),
       );
       tts.flush();
       await _race(tts.awaitDrain());
