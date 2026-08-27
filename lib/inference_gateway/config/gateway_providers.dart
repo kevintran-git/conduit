@@ -59,6 +59,12 @@ class GatewayConfigNotifier extends Notifier<GatewayConfig> {
     await _storage.saveVoiceEnabled(value);
   }
 
+  Future<void> setSttModel(String value) async {
+    final trimmed = value.trim();
+    state = state.copyWith(sttModel: trimmed);
+    await _storage.saveSttModel(trimmed);
+  }
+
   Future<void> setTtsModel(String value) async {
     final trimmed = value.trim().isEmpty
         ? GatewayConfig.defaultTtsModel
