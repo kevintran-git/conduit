@@ -251,6 +251,7 @@ class GatewayCallStt implements CallStt {
   late final ik.StreamingSttClient _ws = ik.StreamingSttClient(
     baseUrl: config.baseUrl,
     apiKey: config.apiKey,
+    backend: config.sttModel,
   );
 
   final StreamController<SttEvent> _events =
