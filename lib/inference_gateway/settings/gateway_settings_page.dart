@@ -17,6 +17,7 @@ import '../../shared/widgets/conduit_components.dart';
 import '../../shared/widgets/utility_components.dart';
 import '../config/gateway_config.dart';
 import '../config/gateway_providers.dart';
+import 'gateway_model_pickers.dart';
 import 'realtime_tuning_card.dart';
 
 enum _CallMode { conduit, pipeline, realtime }
@@ -39,8 +40,6 @@ class GatewaySettingsPage extends ConsumerStatefulWidget {
 class _GatewaySettingsPageState extends ConsumerState<GatewaySettingsPage> {
   late final TextEditingController _urlController;
   late final TextEditingController _keyController;
-  late final TextEditingController _ttsModelController;
-  late final TextEditingController _ttsVoiceController;
   late final TextEditingController _callSystemPromptController;
   bool _obscureKey = true;
 
@@ -50,8 +49,6 @@ class _GatewaySettingsPageState extends ConsumerState<GatewaySettingsPage> {
     final cfg = ref.read(gatewayConfigProvider);
     _urlController = TextEditingController(text: cfg.baseUrl);
     _keyController = TextEditingController(text: cfg.apiKey);
-    _ttsModelController = TextEditingController(text: cfg.ttsModel);
-    _ttsVoiceController = TextEditingController(text: cfg.ttsVoice);
     _callSystemPromptController = TextEditingController(
       text: cfg.callSystemPrompt ?? '',
     );
@@ -61,8 +58,6 @@ class _GatewaySettingsPageState extends ConsumerState<GatewaySettingsPage> {
   void dispose() {
     _urlController.dispose();
     _keyController.dispose();
-    _ttsModelController.dispose();
-    _ttsVoiceController.dispose();
     _callSystemPromptController.dispose();
     super.dispose();
   }
@@ -82,7 +77,7 @@ class _GatewaySettingsPageState extends ConsumerState<GatewaySettingsPage> {
     final base = _credentialsGate(cfg);
     if (base.inactive) return base;
     if (settings.sttPreference != SttPreference.serverOnly) {
-      return _reasonGate('Inactive — Audio input set to on-device.');
+      return _reasonGate('Audio input is set to on-device.');
     }
     return _active;
   }
@@ -91,7 +86,7 @@ class _GatewaySettingsPageState extends ConsumerState<GatewaySettingsPage> {
     final base = _credentialsGate(cfg);
     if (base.inactive) return base;
     if (settings.ttsEngine != TtsEngine.server) {
-      return _reasonGate('Inactive — Audio output set to on-device.');
+      return _reasonGate('Audio output is set to on-device.');
     }
     return _active;
   }
@@ -123,11 +118,11 @@ class _GatewaySettingsPageState extends ConsumerState<GatewaySettingsPage> {
   String _callModeDescription(_CallMode mode) {
     switch (mode) {
       case _CallMode.conduit:
-        return "Built-in call, routed through Open WebUI.";
+        return 'Open WebUI call.';
       case _CallMode.pipeline:
-        return 'Turn-based: STT, chat, TTS — via the gateway.';
+        return 'Gateway STT, chat, TTS — turn by turn.';
       case _CallMode.realtime:
-        return 'Live audio stream via Gemini Live, no pipeline.';
+        return 'Gemini Live audio stream.';
     }
   }
 
@@ -135,7 +130,7 @@ class _GatewaySettingsPageState extends ConsumerState<GatewaySettingsPage> {
     final base = _voiceGate(cfg);
     if (base.inactive) return base;
     if (_callModeOf(cfg) == _CallMode.conduit) {
-      return _reasonGate('Inactive — Call mode is Conduit.');
+      return _reasonGate('Call mode is Conduit.');
     }
     return _active;
   }
@@ -144,7 +139,7 @@ class _GatewaySettingsPageState extends ConsumerState<GatewaySettingsPage> {
     final base = _credentialsGate(cfg);
     if (base.inactive) return base;
     if (!cfg.voiceEnabled && !cfg.realtimeEnabled) {
-      return _reasonGate('Inactive — enable a call mode below.');
+      return _reasonGate('Enable a call mode below.');
     }
     return _active;
   }
@@ -153,7 +148,7 @@ class _GatewaySettingsPageState extends ConsumerState<GatewaySettingsPage> {
     final base = _ttsToggleGate(cfg, settings);
     if (base.inactive) return base;
     if (!cfg.ttsEnabled) {
-      return _reasonGate('Inactive — enable Text-to-speech above.');
+      return _reasonGate('Enable Text-to-speech above.');
     }
     return _active;
   }
@@ -163,8 +158,6 @@ class _GatewaySettingsPageState extends ConsumerState<GatewaySettingsPage> {
     ref.listen<GatewayConfig>(gatewayConfigProvider, (previous, next) {
       _hydrateIfEmpty(_urlController, next.baseUrl);
       _hydrateIfEmpty(_keyController, next.apiKey);
-      _hydrateIfEmpty(_ttsModelController, next.ttsModel);
-      _hydrateIfEmpty(_ttsVoiceController, next.ttsVoice);
       _hydrateIfEmpty(_callSystemPromptController, next.callSystemPrompt ?? '');
     });
     final cfg = ref.watch(gatewayConfigProvider);
@@ -187,19 +180,32 @@ class _GatewaySettingsPageState extends ConsumerState<GatewaySettingsPage> {
           context: context,
           icon: Icons.mic_none,
           title: 'Speech-to-text',
-          subtitle: 'Gateway transcribes your mic input.',
+          subtitle: 'Transcribe your mic input.',
           value: cfg.sttEnabled,
           onChanged: notifier.setSttEnabled,
           gate: _sttGate(cfg, settings),
           onInactiveAction: () => context.pushNamed(RouteNames.audioSettings),
           inactiveActionLabel: 'Audio settings',
         ),
+        if (cfg.sttEnabled) ...[
+          const SizedBox(height: Spacing.sm),
+          _wrapInactive(
+            context,
+            ConduitCard(
+              child: const Padding(
+                padding: EdgeInsets.all(Spacing.md),
+                child: GatewaySttModelField(),
+              ),
+            ),
+            _sttGate(cfg, settings),
+          ),
+        ],
         const SizedBox(height: Spacing.sm),
         _buildToggleTile(
           context: context,
           icon: Icons.volume_up_outlined,
           title: 'Text-to-speech',
-          subtitle: 'Gateway reads replies aloud.',
+          subtitle: 'Read replies aloud.',
           value: cfg.ttsEnabled,
           onChanged: notifier.setTtsEnabled,
           gate: _ttsToggleGate(cfg, settings),
@@ -213,40 +219,7 @@ class _GatewaySettingsPageState extends ConsumerState<GatewaySettingsPage> {
             title: 'Voice options',
             subtitle: '${cfg.ttsModel} · ${cfg.ttsVoice}',
             icon: Icons.record_voice_over_outlined,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                ConduitInput(
-                  label: 'TTS model',
-                  hint: GatewayConfig.defaultTtsModel,
-                  controller: _ttsModelController,
-                  textInputAction: TextInputAction.next,
-                  onSubmitted: notifier.setTtsModel,
-                ),
-                const SizedBox(height: Spacing.md),
-                ConduitInput(
-                  label: 'TTS voice',
-                  hint: GatewayConfig.defaultTtsVoice,
-                  controller: _ttsVoiceController,
-                  textInputAction: TextInputAction.done,
-                  onSubmitted: notifier.setTtsVoice,
-                ),
-                const SizedBox(height: Spacing.md),
-                Row(
-                  children: [
-                    Expanded(
-                      child: ConduitButton(
-                        text: 'Save',
-                        onPressed: () async {
-                          await notifier.setTtsModel(_ttsModelController.text);
-                          await notifier.setTtsVoice(_ttsVoiceController.text);
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
+            child: const GatewayTtsOptions(),
           ),
           _ttsDefaultsGate(cfg, settings),
         ),
@@ -254,8 +227,8 @@ class _GatewaySettingsPageState extends ConsumerState<GatewaySettingsPage> {
         _buildToggleTile(
           context: context,
           icon: Icons.query_stats,
-          title: 'Chat usage stats tool',
-          subtitle: 'Model can check your usage stats.',
+          title: 'Usage stats tool',
+          subtitle: 'Let the model read your usage stats.',
           value: cfg.statsToolEnabled,
           onChanged: notifier.setStatsToolEnabled,
           gate: _toolsGate(cfg),
@@ -274,6 +247,7 @@ class _GatewaySettingsPageState extends ConsumerState<GatewaySettingsPage> {
                   AdaptiveSegmentedSelector<_CallMode>(
                     value: _callModeOf(cfg),
                     onChanged: (mode) => _setCallMode(notifier, mode),
+                    showIcons: false,
                     options: const [
                       (
                         value: _CallMode.conduit,
@@ -320,9 +294,7 @@ class _GatewaySettingsPageState extends ConsumerState<GatewaySettingsPage> {
           context,
           ExpandableCard(
             title: 'Call system prompt',
-            subtitle: hasCustomPrompt
-                ? 'Custom · tap to edit'
-                : 'Using model default · tap to customize',
+            subtitle: hasCustomPrompt ? 'Custom' : 'Model default',
             icon: Icons.forum_outlined,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -382,10 +354,10 @@ class _GatewaySettingsPageState extends ConsumerState<GatewaySettingsPage> {
   ) {
     final form = _buildEndpointForm(context, cfg, notifier, theme);
     final subtitle = GatewayConfig.hasEnvCredentials
-        ? 'Set via environment · tap to edit'
+        ? 'Set via environment'
         : cfg.hasCredentials
-        ? 'Configured · tap to edit'
-        : 'Not configured · tap to add a key';
+        ? 'Configured'
+        : 'Add a key';
     return ExpandableCard(
       title: 'Endpoint',
       subtitle: subtitle,
