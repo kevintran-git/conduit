@@ -18,6 +18,7 @@ class GatewayStorage {
   static const String _kSttEnabled = 'gateway.stt_enabled';
   static const String _kTtsEnabled = 'gateway.tts_enabled';
   static const String _kVoiceEnabled = 'gateway.voice_enabled';
+  static const String _kSttModel = 'gateway.stt_model';
   static const String _kTtsModel = 'gateway.tts_model';
   static const String _kTtsVoice = 'gateway.tts_voice';
   static const String _kVoiceManualMode = 'gateway.voice_manual_mode';
@@ -51,6 +52,7 @@ class GatewayStorage {
       sttEnabled: _read<bool>(_kSttEnabled) ?? false,
       ttsEnabled: _read<bool>(_kTtsEnabled) ?? false,
       voiceEnabled: _read<bool>(_kVoiceEnabled) ?? false,
+      sttModel: _read<String>(_kSttModel) ?? '',
       ttsModel: _read<String>(_kTtsModel) ?? GatewayConfig.defaultTtsModel,
       ttsVoice: _read<String>(_kTtsVoice) ?? GatewayConfig.defaultTtsVoice,
       voiceManualMode: _read<bool>(_kVoiceManualMode) ?? false,
@@ -92,6 +94,7 @@ class GatewayStorage {
   Future<void> saveSttEnabled(bool value) => _write(_kSttEnabled, value);
   Future<void> saveTtsEnabled(bool value) => _write(_kTtsEnabled, value);
   Future<void> saveVoiceEnabled(bool value) => _write(_kVoiceEnabled, value);
+  Future<void> saveSttModel(String value) => _write(_kSttModel, value);
   Future<void> saveTtsModel(String value) => _write(_kTtsModel, value);
   Future<void> saveTtsVoice(String value) => _write(_kTtsVoice, value);
   Future<void> saveVoiceManualMode(bool value) =>
