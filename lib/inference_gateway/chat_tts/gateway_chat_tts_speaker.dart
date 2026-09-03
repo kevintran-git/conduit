@@ -7,6 +7,7 @@ import 'package:pcm_call_audio/pcm_call_audio.dart';
 
 import '../../core/utils/debug_logger.dart';
 import '../config/gateway_config.dart';
+import 'chat_tts_background_lease.dart';
 import 'pcm_wav_audio_source.dart';
 import 'tts_audio_cache.dart';
 import 'tts_position_store.dart';
@@ -35,16 +36,19 @@ class GatewayChatTtsSpeaker {
     required this.config,
     TtsAudioCache? cache,
     TtsPositionStore? positions,
+    ChatTtsBackgroundLease? backgroundLease,
   }) : _client = client,
        _speaker = PcmStreamSpeaker(logScope: 'gateway/chat-tts'),
        _cache = cache ?? TtsAudioCache(),
-       _positions = positions ?? TtsPositionStore();
+       _positions = positions ?? TtsPositionStore(),
+       _lease = backgroundLease ?? ChatTtsBackgroundLease();
 
   final ik.ElevenLabsTtsClient _client;
   final GatewayConfig config;
   final PcmStreamSpeaker _speaker;
   final TtsAudioCache _cache;
   final TtsPositionStore _positions;
+  final ChatTtsBackgroundLease _lease;
 
   bool _disposed = false;
   ik.ElevenLabsTtsSession? _session;
@@ -186,6 +190,7 @@ class GatewayChatTtsSpeaker {
   }
 
   Future<void> _playFrom(String key, Duration from) async {
+    await _lease.acquire();
     var cursor = ttsDurationToBytes(from);
     while (!_disposed && !_stopped && !_paused) {
       final available = await _cache.availableBytes(key);
@@ -326,9 +331,11 @@ class GatewayChatTtsSpeaker {
     if (writer != null) await writer.finish(key: key);
     await _session?.dispose();
     _session = null;
+    if (_paused || _stopped) await _lease.release();
   }
 
   Future<void> _finishNaturally(String key) async {
+    await _lease.release();
     _mode = GatewayTtsMode.idle;
     _lastPosition = Duration.zero;
     await _positions.clear(key);
@@ -375,6 +382,7 @@ class GatewayChatTtsSpeaker {
     _voice = voiceOverride ?? config.ttsVoice;
     _streamOnComplete = onComplete;
     _streamOnError = onError;
+    await _lease.acquire();
 
     try {
       final session = await _openSession(voiceOverride);
@@ -437,6 +445,7 @@ class GatewayChatTtsSpeaker {
       _streamOnComplete = null;
       _streamOnError = null;
       _mode = GatewayTtsMode.idle;
+      await _lease.release();
       final writer = _streamWriter;
       _streamWriter = null;
       if (writer != null && _streamText.trim().isNotEmpty) {
@@ -512,6 +521,7 @@ class GatewayChatTtsSpeaker {
     _liveStartedAt = null;
     _liveBaseBytes = 0;
     _lastPosition = resting;
+    await _lease.release();
     if (key != null) await _positions.save(key, resting);
   }
 
@@ -536,6 +546,7 @@ class GatewayChatTtsSpeaker {
       _lastSavedPosition = _lastPosition;
       await _positions.save(key, _lastPosition);
     }
+    if (!isCaching) await _lease.release();
   }
 
   Future<void> resume() async {
