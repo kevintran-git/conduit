@@ -39,14 +39,17 @@ class GatewayChatTtsSpeaker {
     ChatTtsBackgroundLease? backgroundLease,
   }) : _client = client,
        _speaker = PcmStreamSpeaker(logScope: 'gateway/chat-tts'),
-       _cache = cache ?? TtsAudioCache(),
        _positions = positions ?? TtsPositionStore(),
-       _lease = backgroundLease ?? ChatTtsBackgroundLease();
+       _lease = backgroundLease ?? ChatTtsBackgroundLease() {
+    _cache =
+        cache ??
+        TtsAudioCache(protectedKeys: () => _positions.knownKeys());
+  }
 
   final ik.ElevenLabsTtsClient _client;
   final GatewayConfig config;
   final PcmStreamSpeaker _speaker;
-  final TtsAudioCache _cache;
+  late final TtsAudioCache _cache;
   final TtsPositionStore _positions;
   final ChatTtsBackgroundLease _lease;
 
@@ -72,6 +75,10 @@ class GatewayChatTtsSpeaker {
   bool _stopped = false;
   Duration _lastPosition = Duration.zero;
   Duration _lastSavedPosition = Duration.zero;
+  int _segmentTotalBytes = 0;
+  bool _segmentTotalIsFinal = false;
+
+  static const int _persistSteps = 100;
 
   Future<void>? _playback;
   int _fedLength = 0;
@@ -196,12 +203,17 @@ class GatewayChatTtsSpeaker {
       final available = await _cache.availableBytes(key);
       final complete = await _cache.isComplete(key);
       if (cursor < available) {
-        cursor = await _playCachedSegment(key, available, cursor);
+        cursor = await _playCachedSegment(key, available, cursor, complete);
         continue;
       }
       if (complete) break;
       if (isCaching) {
-        await Future<void>.delayed(const Duration(milliseconds: 200));
+        final writer = _writer;
+        if (writer == null) {
+          await Future<void>.delayed(Duration.zero);
+          continue;
+        }
+        await writer.awaitBytesBeyond(available);
         continue;
       }
       await _playLive(key, cursor);
@@ -211,10 +223,17 @@ class GatewayChatTtsSpeaker {
     await _finishNaturally(key);
   }
 
-  Future<int> _playCachedSegment(String key, int available, int cursor) async {
+  Future<int> _playCachedSegment(
+    String key,
+    int available,
+    int cursor,
+    bool complete,
+  ) async {
     final file = await _cache.pcmFile(key);
     final source = PcmFileAudioSource(file: file, pcmByteLength: available);
     final player = _ensurePlayer();
+    _segmentTotalBytes = available;
+    _segmentTotalIsFinal = complete;
     _mode = GatewayTtsMode.cached;
 
     final done = Completer<void>();
@@ -349,9 +368,20 @@ class GatewayChatTtsSpeaker {
   }
 
   void _maybePersistPosition(String key, Duration value) {
-    if ((value - _lastSavedPosition).abs() < const Duration(seconds: 5)) return;
+    final total = _segmentTotalIsFinal
+        ? ttsBytesToDuration(_segmentTotalBytes)
+        : Duration.zero;
+    final step = ttsBytesToDuration(_segmentTotalBytes) ~/ _persistSteps;
+    if (step > Duration.zero && (value - _lastSavedPosition).abs() < step) {
+      return;
+    }
     _lastSavedPosition = value;
-    unawaited(_positions.save(key, value));
+    unawaited(_positions.save(key, value, total: total));
+  }
+
+  Future<Duration> _finalTotalFor(String key) async {
+    if (!await _cache.isComplete(key)) return Duration.zero;
+    return ttsBytesToDuration(await _cache.availableBytes(key));
   }
 
   ja.AudioPlayer _ensurePlayer() {
@@ -522,7 +552,13 @@ class GatewayChatTtsSpeaker {
     _liveBaseBytes = 0;
     _lastPosition = resting;
     await _lease.release();
-    if (key != null) await _positions.save(key, resting);
+    if (key != null) {
+      await _positions.save(
+        key,
+        resting,
+        total: await _finalTotalFor(key),
+      );
+    }
   }
 
   /// Pausing playback causes the WebSocket to continue sending data to the cache.
@@ -544,7 +580,11 @@ class GatewayChatTtsSpeaker {
     }
     if (key != null) {
       _lastSavedPosition = _lastPosition;
-      await _positions.save(key, _lastPosition);
+      await _positions.save(
+        key,
+        _lastPosition,
+        total: await _finalTotalFor(key),
+      );
     }
     if (!isCaching) await _lease.release();
   }
