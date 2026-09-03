@@ -192,6 +192,7 @@ class GatewayTextToSpeechService extends TextToSpeechService {
     if (_gatewayActive && _speaker != null) {
       await _speaker!.pause();
       _onPause?.call();
+      _releaseWakelockIfIdle();
       return;
     }
     await super.pause();
@@ -200,12 +201,49 @@ class GatewayTextToSpeechService extends TextToSpeechService {
   @override
   Future<void> resume() async {
     if (_gatewayActive && _speaker != null) {
-      await _speaker!.resume();
       _onContinue?.call();
+      unawaited(WakelockPlus.enable());
+      try {
+        await _speaker!.resume();
+      } finally {
+        _releaseWakelockIfIdle();
+      }
       return;
     }
     await super.resume();
   }
+
+  Future<void> seek(Duration position) async {
+    if (!_gatewayActive) return;
+    await _speaker?.seek(position);
+  }
+
+  Future<void> restart(String text) async {
+    if (!_gatewayActive) {
+      await super.speak(text);
+      return;
+    }
+    unawaited(WakelockPlus.enable());
+    try {
+      await _ensureSpeaker().restart(
+        text,
+        onStart: _onStart,
+        onComplete: _onComplete,
+        onError: _onError,
+      );
+    } finally {
+      _releaseWakelockIfIdle();
+    }
+  }
+
+  Future<Duration?> storedPositionFor(String text) async {
+    if (!_gatewayActive) return null;
+    return _ensureSpeaker().storedPositionFor(text);
+  }
+
+  Duration get gatewayPosition => _speaker?.position ?? Duration.zero;
+
+  bool get gatewayPaused => _speaker?.isPaused ?? false;
 
   @override
   Future<List<Map<String, dynamic>>> getAvailableVoices() async {
