@@ -8,6 +8,7 @@ import '../../shared/theme/theme_extensions.dart';
 import '../../shared/widgets/conduit_components.dart';
 import '../config/gateway_config.dart';
 import '../config/gateway_providers.dart';
+import 'gateway_model_pickers.dart';
 
 class RealtimeTuningCard extends ConsumerStatefulWidget {
   const RealtimeTuningCard({super.key});
@@ -17,8 +18,6 @@ class RealtimeTuningCard extends ConsumerStatefulWidget {
 }
 
 class _RealtimeTuningCardState extends ConsumerState<RealtimeTuningCard> {
-  late final TextEditingController _callModelController;
-  late final TextEditingController _callVoiceController;
   late final TextEditingController _callPauseToleranceController;
   late final TextEditingController _callPrefixPaddingController;
 
@@ -26,8 +25,6 @@ class _RealtimeTuningCardState extends ConsumerState<RealtimeTuningCard> {
   void initState() {
     super.initState();
     final cfg = ref.read(gatewayConfigProvider);
-    _callModelController = TextEditingController(text: cfg.callModel);
-    _callVoiceController = TextEditingController(text: cfg.callVoice);
     _callPauseToleranceController = TextEditingController(
       text: cfg.callPauseToleranceMs.toString(),
     );
@@ -38,8 +35,6 @@ class _RealtimeTuningCardState extends ConsumerState<RealtimeTuningCard> {
 
   @override
   void dispose() {
-    _callModelController.dispose();
-    _callVoiceController.dispose();
     _callPauseToleranceController.dispose();
     _callPrefixPaddingController.dispose();
     super.dispose();
@@ -51,11 +46,16 @@ class _RealtimeTuningCardState extends ConsumerState<RealtimeTuningCard> {
     controller.text = value;
   }
 
+  String _subtitle(GatewayConfig cfg) {
+    final model = cfg.callModel.isEmpty ? 'Gateway default' : cfg.callModel;
+    final voice = cfg.callVoice.isEmpty ? 'gateway voice' : cfg.callVoice;
+    final level = cfg.callThinkingLevel;
+    return level.isEmpty ? '$model · $voice' : '$model · $voice · $level';
+  }
+
   @override
   Widget build(BuildContext context) {
     ref.listen<GatewayConfig>(gatewayConfigProvider, (previous, next) {
-      _hydrateIfEmpty(_callModelController, next.callModel);
-      _hydrateIfEmpty(_callVoiceController, next.callVoice);
       _hydrateIfEmpty(
         _callPauseToleranceController,
         next.callPauseToleranceMs.toString(),
@@ -70,26 +70,15 @@ class _RealtimeTuningCardState extends ConsumerState<RealtimeTuningCard> {
 
     return ExpandableCard(
       title: 'Realtime tuning',
-      subtitle: '${cfg.callModel} · ${cfg.callVoice}',
+      subtitle: _subtitle(cfg),
       icon: Icons.tune,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ConduitInput(
-            label: 'Live model',
-            hint: GatewayConfig.defaultCallModel,
-            controller: _callModelController,
-            textInputAction: TextInputAction.next,
-            onSubmitted: notifier.setCallModel,
-          ),
+          const GatewayCallModelField(),
+          const GatewayCallThinkingLevelField(),
           const SizedBox(height: Spacing.md),
-          ConduitInput(
-            label: 'Live voice',
-            hint: GatewayConfig.defaultCallVoice,
-            controller: _callVoiceController,
-            textInputAction: TextInputAction.next,
-            onSubmitted: notifier.setCallVoice,
-          ),
+          const GatewayCallVoiceField(),
           const SizedBox(height: Spacing.md),
           ConduitInput(
             label: 'Pause tolerance (ms)',

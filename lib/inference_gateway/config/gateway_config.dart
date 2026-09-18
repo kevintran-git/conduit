@@ -1,8 +1,4 @@
-/// Immutable configuration for the inference gateway.
 ///
-/// Holds the gateway base URL, API key, and per-service feature toggles.
-/// When all toggles are `false` (the default), no gateway code paths run and
-/// upstream Open WebUI behavior is preserved byte-for-byte.
 class GatewayConfig {
   const GatewayConfig({
     required this.baseUrl,
@@ -15,8 +11,9 @@ class GatewayConfig {
     required this.voiceManualMode,
     required this.realtimeEnabled,
     this.sttModel = '',
-    this.callModel = defaultCallModel,
-    this.callVoice = defaultCallVoice,
+    this.callModel = unsetModel,
+    this.callVoice = unsetModel,
+    this.callThinkingLevel = unsetThinkingLevel,
     this.callPauseToleranceMs = defaultCallPauseToleranceMs,
     this.callPrefixPaddingMs = defaultCallPrefixPaddingMs,
     this.callStartSensitivity = defaultCallSensitivity,
@@ -25,14 +22,11 @@ class GatewayConfig {
     this.statsToolEnabled = false,
   });
 
-  /// Default base URL — the user's own OpenAI-compatible gateway. The user
-  /// can override this in settings; future support for self-hosted endpoints
-  /// just changes this string.
   static const String defaultBaseUrl = 'https://api.kvt.codes';
-  static const String defaultTtsModel = 'tts-1';
-  static const String defaultTtsVoice = 'alloy';
-  static const String defaultCallModel = 'gemini-3.1-flash-live-preview';
-  static const String defaultCallVoice = 'Puck';
+
+  static const String unsetModel = '';
+
+  static const String unsetThinkingLevel = '';
   static const int defaultCallPauseToleranceMs = 800;
   static const int defaultCallPrefixPaddingMs = 300;
   static const String defaultCallSensitivity = 'LOW';
@@ -42,9 +36,6 @@ class GatewayConfig {
   static bool get hasEnvCredentials =>
       envBaseUrl.isNotEmpty && envApiKey.isNotEmpty;
 
-  /// Off-by-default configuration. On first app launch this is what every
-  /// shim point sees, which means inference still routes through OWUI until
-  /// the user opts in.
   factory GatewayConfig.defaults() => const GatewayConfig(
     baseUrl: defaultBaseUrl,
     apiKey: '',
@@ -52,12 +43,13 @@ class GatewayConfig {
     ttsEnabled: false,
     voiceEnabled: false,
     sttModel: '',
-    ttsModel: defaultTtsModel,
-    ttsVoice: defaultTtsVoice,
+    ttsModel: unsetModel,
+    ttsVoice: unsetModel,
     voiceManualMode: false,
     realtimeEnabled: false,
-    callModel: defaultCallModel,
-    callVoice: defaultCallVoice,
+    callModel: unsetModel,
+    callVoice: unsetModel,
+    callThinkingLevel: unsetThinkingLevel,
     callPauseToleranceMs: defaultCallPauseToleranceMs,
     callPrefixPaddingMs: defaultCallPrefixPaddingMs,
     callStartSensitivity: defaultCallSensitivity,
@@ -72,21 +64,18 @@ class GatewayConfig {
   final bool ttsEnabled;
   final bool voiceEnabled;
 
-  /// `backend` from `/v1/audio/transcription/capabilities`. Empty leaves the
-  /// server on its `default_backend`.
   final String sttModel;
 
   final String ttsModel;
   final String ttsVoice;
 
-  /// When true, the call screen disables VAD entirely — pure push-to-talk.
-  /// Default false: VAD with manual override (press to suppress).
   final bool voiceManualMode;
 
   final bool realtimeEnabled;
 
   final String callModel;
   final String callVoice;
+  final String callThinkingLevel;
 
   final int callPauseToleranceMs;
 
@@ -95,21 +84,12 @@ class GatewayConfig {
   final String callStartSensitivity;
   final String callEndSensitivity;
 
-  /// Optional system prompt injected at the start of every voice call turn
-  /// when the Open WebUI server has not already provided one. Use this to
-  /// instruct the model to keep replies short, avoid markdown, etc.
-  /// Null / empty = no injection (model uses its own defaults).
   final String? callSystemPrompt;
 
   final bool statsToolEnabled;
 
-  /// True when any service is enabled — used by shim points as a fast-path
-  /// short-circuit. Returns false in the common (gateway-off) case so the
-  /// hot path on existing OWUI users is one boolean check.
   bool get anyEnabled => sttEnabled || ttsEnabled || voiceEnabled;
 
-  /// True when the config is well-formed enough to actually send traffic.
-  /// Toggles ON without a URL+key are inert — the shim falls back to OWUI.
   bool get hasCredentials => baseUrl.isNotEmpty && apiKey.isNotEmpty;
 
   GatewayConfig copyWith({
@@ -125,6 +105,7 @@ class GatewayConfig {
     bool? realtimeEnabled,
     String? callModel,
     String? callVoice,
+    String? callThinkingLevel,
     int? callPauseToleranceMs,
     int? callPrefixPaddingMs,
     String? callStartSensitivity,
@@ -145,6 +126,7 @@ class GatewayConfig {
       realtimeEnabled: realtimeEnabled ?? this.realtimeEnabled,
       callModel: callModel ?? this.callModel,
       callVoice: callVoice ?? this.callVoice,
+      callThinkingLevel: callThinkingLevel ?? this.callThinkingLevel,
       callPauseToleranceMs: callPauseToleranceMs ?? this.callPauseToleranceMs,
       callPrefixPaddingMs: callPrefixPaddingMs ?? this.callPrefixPaddingMs,
       callStartSensitivity: callStartSensitivity ?? this.callStartSensitivity,
@@ -174,6 +156,7 @@ class GatewayConfig {
         other.realtimeEnabled == realtimeEnabled &&
         other.callModel == callModel &&
         other.callVoice == callVoice &&
+        other.callThinkingLevel == callThinkingLevel &&
         other.callPauseToleranceMs == callPauseToleranceMs &&
         other.callPrefixPaddingMs == callPrefixPaddingMs &&
         other.callStartSensitivity == callStartSensitivity &&
@@ -196,6 +179,7 @@ class GatewayConfig {
     realtimeEnabled,
     callModel,
     callVoice,
+    callThinkingLevel,
     callPauseToleranceMs,
     callPrefixPaddingMs,
     callStartSensitivity,
