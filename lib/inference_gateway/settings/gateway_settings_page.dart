@@ -122,7 +122,7 @@ class _GatewaySettingsPageState extends ConsumerState<GatewaySettingsPage> {
       case _CallMode.pipeline:
         return 'Gateway STT, chat, TTS — turn by turn.';
       case _CallMode.realtime:
-        return 'Gemini Live audio stream.';
+        return 'Realtime audio stream.';
     }
   }
 
