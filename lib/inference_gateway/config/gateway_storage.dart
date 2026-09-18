@@ -3,13 +3,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../../core/persistence/preferences_store.dart';
 import 'gateway_config.dart';
 
-/// Persistence for gateway settings.
 ///
-/// Non-secret fields (URL, toggles) live in the app's shared `PreferencesStore`
-/// under the `gateway.*` key prefix. The API key lives in
-/// `flutter_secure_storage` under `inference_gateway_api_key`, isolated from
-/// `SecureCredentialStorage` so this code stays additive — no upstream
-/// secure-storage edits required.
 class GatewayStorage {
   GatewayStorage({FlutterSecureStorage? secureStorage})
     : _secureStorage = secureStorage ?? const FlutterSecureStorage();
@@ -25,6 +19,7 @@ class GatewayStorage {
   static const String _kRealtimeEnabled = 'gateway.realtime_enabled';
   static const String _kCallModel = 'gateway.call_model';
   static const String _kCallVoice = 'gateway.call_voice';
+  static const String _kCallThinkingLevel = 'gateway.call_thinking_level';
   static const String _kCallPauseToleranceMs =
       'gateway.call_pause_tolerance_ms';
   static const String _kCallPrefixPaddingMs = 'gateway.call_prefix_padding_ms';
@@ -53,12 +48,15 @@ class GatewayStorage {
       ttsEnabled: _read<bool>(_kTtsEnabled) ?? false,
       voiceEnabled: _read<bool>(_kVoiceEnabled) ?? false,
       sttModel: _read<String>(_kSttModel) ?? '',
-      ttsModel: _read<String>(_kTtsModel) ?? GatewayConfig.defaultTtsModel,
-      ttsVoice: _read<String>(_kTtsVoice) ?? GatewayConfig.defaultTtsVoice,
+      ttsModel: _read<String>(_kTtsModel) ?? GatewayConfig.unsetModel,
+      ttsVoice: _read<String>(_kTtsVoice) ?? GatewayConfig.unsetModel,
       voiceManualMode: _read<bool>(_kVoiceManualMode) ?? false,
       realtimeEnabled: _read<bool>(_kRealtimeEnabled) ?? false,
-      callModel: _read<String>(_kCallModel) ?? GatewayConfig.defaultCallModel,
-      callVoice: _read<String>(_kCallVoice) ?? GatewayConfig.defaultCallVoice,
+      callModel: _read<String>(_kCallModel) ?? GatewayConfig.unsetModel,
+      callVoice: _read<String>(_kCallVoice) ?? GatewayConfig.unsetModel,
+      callThinkingLevel:
+          _read<String>(_kCallThinkingLevel) ??
+          GatewayConfig.unsetThinkingLevel,
       callPauseToleranceMs:
           _read<int>(_kCallPauseToleranceMs) ??
           GatewayConfig.defaultCallPauseToleranceMs,
@@ -104,6 +102,8 @@ class GatewayStorage {
 
   Future<void> saveCallModel(String value) => _write(_kCallModel, value);
   Future<void> saveCallVoice(String value) => _write(_kCallVoice, value);
+  Future<void> saveCallThinkingLevel(String value) =>
+      _write(_kCallThinkingLevel, value);
   Future<void> saveCallPauseToleranceMs(int value) =>
       _write(_kCallPauseToleranceMs, value);
   Future<void> saveCallPrefixPaddingMs(int value) =>

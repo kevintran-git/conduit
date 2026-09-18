@@ -5,12 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'gateway_config.dart';
 import 'gateway_storage.dart';
 
-/// Single source of truth for the gateway configuration in memory.
 ///
-/// On construction, loads non-secret fields synchronously from preferences and
-/// kicks off an async load of the API key from secure storage. Until the API key
-/// resolves, `hasCredentials` is false so shim points fall back to OWUI even
-/// if the user has toggles on — preventing a brief unauthenticated burst.
 class GatewayConfigNotifier extends Notifier<GatewayConfig> {
   late GatewayStorage _storage;
 
@@ -66,17 +61,13 @@ class GatewayConfigNotifier extends Notifier<GatewayConfig> {
   }
 
   Future<void> setTtsModel(String value) async {
-    final trimmed = value.trim().isEmpty
-        ? GatewayConfig.defaultTtsModel
-        : value.trim();
+    final trimmed = value.trim();
     state = state.copyWith(ttsModel: trimmed);
     await _storage.saveTtsModel(trimmed);
   }
 
   Future<void> setTtsVoice(String value) async {
-    final trimmed = value.trim().isEmpty
-        ? GatewayConfig.defaultTtsVoice
-        : value.trim();
+    final trimmed = value.trim();
     state = state.copyWith(ttsVoice: trimmed);
     await _storage.saveTtsVoice(trimmed);
   }
@@ -92,19 +83,21 @@ class GatewayConfigNotifier extends Notifier<GatewayConfig> {
   }
 
   Future<void> setCallModel(String value) async {
-    final trimmed = value.trim().isEmpty
-        ? GatewayConfig.defaultCallModel
-        : value.trim();
+    final trimmed = value.trim();
     state = state.copyWith(callModel: trimmed);
     await _storage.saveCallModel(trimmed);
   }
 
   Future<void> setCallVoice(String value) async {
-    final trimmed = value.trim().isEmpty
-        ? GatewayConfig.defaultCallVoice
-        : value.trim();
+    final trimmed = value.trim();
     state = state.copyWith(callVoice: trimmed);
     await _storage.saveCallVoice(trimmed);
+  }
+
+  Future<void> setCallThinkingLevel(String value) async {
+    final trimmed = value.trim().toUpperCase();
+    state = state.copyWith(callThinkingLevel: trimmed);
+    await _storage.saveCallThinkingLevel(trimmed);
   }
 
   Future<void> setCallPauseToleranceMs(int value) async {
@@ -157,9 +150,6 @@ final gatewayConfigProvider =
       GatewayConfigNotifier.new,
     );
 
-/// Convenience selectors used by shim points. Each is a boolean derived from
-/// the live config — the feature toggle AND `hasCredentials` — so a
-/// misconfigured gateway never short-circuits the OWUI path.
 final gatewaySttActiveProvider = Provider<bool>((ref) {
   final cfg = ref.watch(gatewayConfigProvider);
   return cfg.sttEnabled && cfg.hasCredentials;
@@ -180,6 +170,4 @@ final gatewayRealtimeActiveProvider = Provider<bool>((ref) {
   return cfg.realtimeEnabled && cfg.hasCredentials;
 });
 
-/// Whether a realtime voice call is active. Defaults to `false`; overridden
-/// by `gatewayProviderOverrides()` to mirror `gatewayRealtimeCallActiveProvider`.
 final realtimeCallActiveProvider = Provider<bool>((ref) => false);
