@@ -323,6 +323,7 @@ class RealtimeCallSession extends Notifier<CallSessionState>
     try {
       await client.start(
         model: cfg.callModel,
+        thinkingLevel: cfg.callThinkingLevel,
         systemInstruction: cfg.callSystemPrompt,
         voiceName: cfg.callVoice,
         silenceDurationMs: cfg.callPauseToleranceMs,
