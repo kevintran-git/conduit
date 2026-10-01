@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:pcm_call_audio/pcm_call_audio.dart';
 import 'package:inference_kit/inference_kit.dart' as ik;
 
-import '../../../core/utils/debug_logger.dart';
+import 'package:conduit_core/utils/debug_logger.dart';
 import '../../config/gateway_config.dart';
 
 /// Coarse pipeline state for [CallTts]. Surfaced via [CallTts.status] so

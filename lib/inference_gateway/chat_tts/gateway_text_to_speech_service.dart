@@ -5,31 +5,24 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:inference_kit/inference_kit.dart' as ik;
 import 'package:wakelock_plus/wakelock_plus.dart';
 
-import '../../core/models/backend_config.dart';
-import '../../core/providers/app_providers.dart';
-import '../../core/utils/debug_logger.dart';
+import 'package:conduit_core/models/backend_config.dart';
+import 'package:conduit_core/features/chat/server_speech/server_speech_providers.dart';
+import 'package:conduit_core/providers/app_providers.dart';
+import 'package:conduit_core/utils/debug_logger.dart';
+
 import '../../features/chat/services/text_to_speech_service.dart';
+import '../../features/chat/services/tts_manager.dart';
 import '../../features/chat/voice_mode/chat_voice_mode_controller.dart';
 import '../config/gateway_providers.dart';
 import '../router/gateway_router_providers.dart';
 import 'gateway_chat_tts_speaker.dart';
 
-/// [TextToSpeechService] subclass that routes speech through the gateway's
-/// ElevenLabs WS when gateway TTS is active — both the chat-message speaker
-/// button ([speak]) and the incremental path upstream's voice mode drives
-/// ([startStreamingTts] / [feedStreamingText] / [finishStreamingTts]).
 ///
-/// Lets both benefit from first-byte playback rather than waiting on a full
-/// PCM blob per chunk like upstream's TtsManager. Falls through to the parent
-/// implementation (TtsManager → device / OWUI server) whenever the gateway is
-/// off, so existing behavior is preserved for non-gateway users.
 ///
-/// Touches no upstream files — wired in by overriding
-/// `textToSpeechServiceProvider` in the root `ProviderScope`.
 class GatewayTextToSpeechService extends TextToSpeechService {
   GatewayTextToSpeechService({
     required Ref ref,
-    super.api,
+    super.serverSpeech,
     super.backendConfig,
     super.loadBackendConfig,
   }) : _ref = ref;
@@ -167,9 +160,6 @@ class GatewayTextToSpeechService extends TextToSpeechService {
     _releaseWakelockIfIdle();
   }
 
-  /// Release the wake lock only when no voice call is in progress — the
-  /// call session has its own enable/disable pair, and a stray disable
-  /// from chat TTS would let the screen sleep mid-call.
   void _releaseWakelockIfIdle() {
     final callActive = _ref.read(chatVoiceModeControllerProvider).isActive;
     if (!callActive) {
@@ -262,11 +252,7 @@ class GatewayTextToSpeechService extends TextToSpeechService {
   }
 }
 
-/// Use this in main.dart to override `textToSpeechServiceProvider`. Mirrors
-/// upstream's provider shape (api watch + backend-config refresh listener)
-/// so behavior is identical when the gateway is off.
 TextToSpeechService createGatewayTextToSpeechService(Ref ref) {
-  final api = ref.watch(apiServiceProvider);
   BackendConfig? readBackendConfig() {
     return ref
         .read(backendConfigProvider)
@@ -275,13 +261,16 @@ TextToSpeechService createGatewayTextToSpeechService(Ref ref) {
 
   final service = GatewayTextToSpeechService(
     ref: ref,
-    api: api,
+    serverSpeech: ref.read(serverSpeechProviderProvider),
     backendConfig: readBackendConfig(),
     loadBackendConfig: () async {
       await ref.read(backendConfigProvider.notifier).refresh();
       return readBackendConfig();
     },
   );
+  ref.listen(serverSpeechProviderProvider, (_, next) {
+    TtsManager.instance.setServerSpeech(next);
+  });
   ref.listen(backendConfigProvider, (_, next) {
     service.setBackendConfig(
       next.maybeWhen(data: (value) => value, orElse: () => null),

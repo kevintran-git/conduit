@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../core/services/navigation_service.dart';
-import '../../core/services/settings_service.dart';
+import '../../shared/services/navigation_service.dart';
+
+import 'package:conduit_core/services/settings_service.dart';
+
 import '../../features/profile/widgets/adaptive_segmented_selector.dart';
 import '../../features/profile/widgets/customization_tile.dart';
 import '../../features/profile/widgets/expandable_card.dart';
@@ -594,7 +596,15 @@ Widget gatewayProfileTile(BuildContext context) {
   final theme = context.conduitTheme;
   final color = theme.buttonPrimary;
   return ProfileSettingTile(
-    onTap: () => context.pushNamed('gateway-settings'),
+    onTap: () => Navigator.of(context).push<void>(
+      Theme.of(context).platform == TargetPlatform.iOS
+          ? CupertinoPageRoute<void>(
+              builder: (_) => const GatewaySettingsPage(),
+            )
+          : MaterialPageRoute<void>(
+              builder: (_) => const GatewaySettingsPage(),
+            ),
+    ),
     leading: Container(
       width: 40,
       height: 40,

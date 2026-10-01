@@ -1,6 +1,6 @@
 import 'package:inference_kit/inference_kit.dart' as ik;
 
-import '../../../core/utils/debug_logger.dart';
+import 'package:conduit_core/utils/debug_logger.dart';
 
 Future<List<ik.LiveFunctionResponse>> executeLiveToolCalls(
   List<ik.LiveFunctionCall> calls,

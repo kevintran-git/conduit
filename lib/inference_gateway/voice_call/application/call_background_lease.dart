@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import '../../../core/services/background_streaming_handler.dart';
-import '../../../core/utils/debug_logger.dart';
+import 'package:conduit_core/utils/debug_logger.dart';
 
 /// Holds a native background-execution lease for the lifetime of a voice call.
 ///
