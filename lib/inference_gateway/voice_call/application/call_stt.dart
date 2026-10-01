@@ -4,7 +4,7 @@ import 'dart:typed_data';
 import 'package:inference_kit/inference_kit.dart' as ik;
 import 'package:record/record.dart';
 
-import '../../../core/utils/debug_logger.dart';
+import 'package:conduit_core/utils/debug_logger.dart';
 import '../../../features/chat/services/native_stt_service.dart';
 import '../../config/gateway_config.dart';
 

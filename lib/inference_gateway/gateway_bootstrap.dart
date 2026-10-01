@@ -1,15 +1,15 @@
 import 'package:inference_kit/inference_kit.dart' as ik;
 import 'package:pcm_call_audio/pcm_call_audio.dart' as pcm;
 
-import '../core/providers/app_providers.dart' show apiServiceProvider;
-import '../core/utils/debug_logger.dart';
+import 'package:conduit_core/providers/app_providers.dart' show apiServiceProvider;
+import 'package:conduit_core/utils/debug_logger.dart';
 import '../features/chat/providers/chat_providers.dart'
     show imageGenerationEnabledProvider, webSearchEnabledProvider;
 import '../features/chat/providers/text_to_speech_provider.dart'
     show textToSpeechServiceProvider;
 import '../features/chat/voice_call/presentation/voice_call_launcher.dart'
     show voiceCallLauncherProvider;
-import '../features/tools/providers/tools_providers.dart'
+import 'package:conduit_core/features/tools/providers/tools_providers.dart'
     show
         selectedFilterIdsProvider,
         selectedTerminalIdProvider,

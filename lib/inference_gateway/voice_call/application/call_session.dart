@@ -4,11 +4,11 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
-import '../../../core/models/chat_message.dart';
-import '../../../core/providers/app_providers.dart';
-import '../../../core/services/settings_service.dart';
-import '../../../core/utils/debug_logger.dart';
-import '../../../core/utils/reasoning_parser.dart';
+import 'package:conduit_core/models/chat_message.dart';
+import 'package:conduit_core/providers/app_providers.dart';
+import 'package:conduit_core/services/settings_service.dart';
+import 'package:conduit_core/utils/debug_logger.dart';
+import 'package:conduit_markdown/conduit_markdown.dart';
 import '../../../features/chat/providers/chat_providers.dart' as chat;
 import '../../config/gateway_providers.dart';
 import '../../router/gateway_router_providers.dart';
