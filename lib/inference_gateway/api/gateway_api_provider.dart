@@ -7,14 +7,7 @@ import 'package:conduit_core/services/worker_manager.dart';
 import '../router/gateway_router_providers.dart';
 import 'gateway_api_service.dart';
 
-/// Override callback for `apiServiceProvider` that constructs a
-/// [GatewayApiService] instead of a plain `ApiService`. Wire this into
-/// `ProviderScope.overrides` so every call site (UI, services, sync,
-/// etc.) transparently gets gateway routing without changes to the
-/// upstream provider definition.
 ///
-/// Mirrors the body of `apiServiceProvider` in `app_providers.dart`. If
-/// upstream's setup logic changes, update this override to match.
 ApiService? gatewayApiServiceProviderOverride(Ref ref) {
   final reviewerMode = ref.watch(reviewerModeProvider);
   if (reviewerMode) return null;

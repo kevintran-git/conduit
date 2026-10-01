@@ -14,13 +14,7 @@ import 'tts_position_store.dart';
 
 enum GatewayTtsMode { idle, live, cached }
 
-/// Streaming TTS for the chat surface, in one-shot and incremental flavors.
 ///
-/// Both open an ElevenLabs WS and pump PCM frames through a
-/// [PcmStreamSpeaker], so playback starts on the first frame instead of
-/// waiting for a full PCM blob. [play] pushes a complete string and resolves
-/// when the audio finishes; [startStream]/[feed]/[finishStream] append text as
-/// a reply arrives, which is what upstream's voice mode drives through
 /// `TextToSpeechService.feedStreamingText`.
 ///
 /// The caching of frames depends on the text, voice, and model.
@@ -28,8 +22,6 @@ enum GatewayTtsMode { idle, live, cached }
 /// Seeking and resuming playback require access to the cache.
 /// The TtsPositionStore is responsible for maintaining playback positions.
 ///
-/// Lifecycle callbacks let upstream's `TextToSpeechController` update its
-/// "Speaking…" indicator without us touching its event bus.
 class GatewayChatTtsSpeaker {
   GatewayChatTtsSpeaker({
     required ik.ElevenLabsTtsClient client,
@@ -396,8 +388,6 @@ class GatewayChatTtsSpeaker {
     );
   }
 
-  /// Opens a session that stays open across [feed] calls. Playback runs in the
-  /// background from here on; [finishStream] is what waits for it to drain.
   Future<void> startStream({
     void Function()? onStart,
     void Function()? onComplete,
@@ -447,8 +437,6 @@ class GatewayChatTtsSpeaker {
     }
   }
 
-  /// Appends whatever part of [accumulatedText] hasn't been sent yet. Callers
-  /// pass the full text so far, matching `TextToSpeechService`'s contract.
   void feed(String accumulatedText) {
     final session = _session;
     if (_disposed || session == null) return;
@@ -461,7 +449,6 @@ class GatewayChatTtsSpeaker {
     _streamText = accumulatedText;
   }
 
-  /// Flushes the session and resolves once the queued audio has played out.
   Future<void> finishStream({String? finalText}) async {
     final session = _session;
     if (_disposed || session == null) return;
