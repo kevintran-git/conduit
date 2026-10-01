@@ -1,6 +1,6 @@
 import 'dart:typed_data';
 
-import '../../core/services/api_service.dart';
+import 'package:conduit_core/services/api_service.dart';
 import '../router/gateway_inference_router.dart';
 
 /// `ApiService` subclass that routes speech-to-text and text-to-speech

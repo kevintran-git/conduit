@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import '../../core/services/background_streaming_handler.dart';
-import '../../core/utils/debug_logger.dart';
+import 'package:conduit_core/utils/debug_logger.dart';
 
 /// This component maintains a lease for chat background audio while text-to-speech is active.
 /// The Android version of this software operates the dataSync foreground service.

@@ -3,9 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/providers/app_providers.dart';
-import '../../../core/services/navigation_service.dart';
-import '../../../features/auth/providers/unified_auth_providers.dart';
+import 'package:conduit_core/providers/app_providers.dart';
+import '../../../shared/services/navigation_service.dart';
+import 'package:conduit_core/features/auth/providers/unified_auth_providers.dart';
 import '../../../features/chat/voice_call/presentation/voice_call_launcher.dart';
 import '../../config/gateway_providers.dart';
 import '../application/call_session.dart';
