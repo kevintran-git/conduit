@@ -3,11 +3,6 @@ import 'dart:typed_data';
 import 'package:conduit_core/services/api_service.dart';
 import '../router/gateway_inference_router.dart';
 
-/// `ApiService` subclass that routes speech-to-text and text-to-speech
-/// through the inference gateway when those toggles are on. Everything else
-/// falls through to the upstream `ApiService` behavior unchanged. Lives
-/// entirely under `lib/inference_gateway/` so the core API class stays vanilla
-/// and easy to merge with upstream.
 class GatewayApiService extends ApiService {
   GatewayApiService({
     required super.serverConfig,
