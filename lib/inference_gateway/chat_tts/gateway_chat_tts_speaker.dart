@@ -5,7 +5,7 @@ import 'package:inference_kit/inference_kit.dart' as ik;
 import 'package:just_audio/just_audio.dart' as ja;
 import 'package:pcm_call_audio/pcm_call_audio.dart';
 
-import '../../core/utils/debug_logger.dart';
+import 'package:conduit_core/utils/debug_logger.dart';
 import '../config/gateway_config.dart';
 import 'chat_tts_background_lease.dart';
 import 'pcm_wav_audio_source.dart';

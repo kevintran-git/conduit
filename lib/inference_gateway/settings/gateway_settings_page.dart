@@ -4,8 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../core/services/navigation_service.dart';
-import '../../core/services/settings_service.dart';
+import '../../shared/services/navigation_service.dart';
+import 'package:conduit_core/services/settings_service.dart';
 import '../../features/profile/widgets/adaptive_segmented_selector.dart';
 import '../../features/profile/widgets/customization_tile.dart';
 import '../../features/profile/widgets/expandable_card.dart';

@@ -1,9 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/auth/auth_state_manager.dart';
-import '../../core/providers/app_providers.dart';
-import '../../core/services/api_service.dart';
-import '../../core/services/worker_manager.dart';
+import 'package:conduit_core/auth/auth_state_manager.dart';
+import 'package:conduit_core/providers/app_providers.dart';
+import 'package:conduit_core/services/api_service.dart';
+import 'package:conduit_core/services/worker_manager.dart';
 import '../router/gateway_router_providers.dart';
 import 'gateway_api_service.dart';
 
