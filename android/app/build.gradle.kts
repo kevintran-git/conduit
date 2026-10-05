@@ -49,8 +49,8 @@ val fcmSettingNames = listOf(
 
 android {
     namespace = "app.cogwheel.conduit"
-    compileSdk = 37
-    ndkVersion = "29.0.14206865"
+    compileSdk = flutter.compileSdkVersion
+    ndkVersion = flutter.ndkVersion
 
     defaultConfig {
         applicationId = "app.cogwheel.conduit"
