@@ -9,7 +9,7 @@ import 'package:conduit_core/providers/app_providers.dart';
 import 'package:conduit_core/services/settings_service.dart';
 import 'package:conduit_core/utils/debug_logger.dart';
 import 'package:conduit_markdown/conduit_markdown.dart';
-import '../../../features/chat/providers/chat_providers.dart' as chat;
+import 'package:conduit_core/features/chat/providers/chat_providers.dart' as chat;
 import '../../config/gateway_providers.dart';
 import '../../router/gateway_router_providers.dart';
 import '../domain/call_step.dart';
@@ -18,34 +18,17 @@ import 'call_engine.dart';
 import 'call_stt.dart';
 import 'call_tts.dart';
 
-/// The voice call.
 ///
-/// Reads top to bottom: [_runLoop] is the entire conversation, expressed as
-/// a `while` loop over four steps — listen, think, speak, wait. No state
-/// machine, no callback web. The [CallStep] enum is just a label the UI
-/// reads; the loop decides what happens next.
 ///
-/// Cancellation: every long-running await inside a turn races against a
-/// per-turn [Completer<void>] called `_cancel`. Tapping the mic button
-/// during `thinking` / `speaking` completes it, the in-flight awaits throw
-/// [_BargedIn], cleanup runs in `on _BargedIn` / `finally`, and the loop
-/// rolls over to the next iteration. That's the whole interruption model.
 class CallSession extends Notifier<CallSessionState> implements CallEngine {
   CallStt? _stt;
   CallTts? _tts;
   StreamSubscription<bool>? _ttsPlayingSub;
   StreamSubscription<TtsStatus>? _ttsStatusSub;
 
-  /// Native background-execution lease, held for the whole call so it survives
-  /// backgrounding / screen lock. Acquired once setup succeeds, released in
   /// [_teardown].
   CallBackgroundLease? _backgroundLease;
 
-  /// Broadcast pipe for chat messages updates. Used to detect end-of-stream
-  /// (`isStreaming` flips false) so we can flush the TTS WS. Subscribed
-  /// permanently in [build] via `ref.listen`, then re-broadcast so
-  /// [_thinkAndSpeak] can take an ad-hoc per-turn subscription. (Notifier
-  /// `ref` doesn't expose `listenManual` in this Riverpod version.)
   final StreamController<List<ChatMessage>> _chatStream =
       StreamController<List<ChatMessage>>.broadcast();
 
@@ -53,9 +36,6 @@ class CallSession extends Notifier<CallSessionState> implements CallEngine {
   Completer<void>? _cancel;
   Completer<void>? _resume;
 
-  /// Run of consecutive failed turns. A clean barge-in or completed
-  /// think+speak resets it; three strikes ends the loop so we don't
-  /// spin forever on a dead network or misconfigured gateway.
   int _consecutiveFailures = 0;
   static const int _maxConsecutiveFailures = 3;
 
@@ -73,10 +53,6 @@ class CallSession extends Notifier<CallSessionState> implements CallEngine {
     );
   }
 
-  /// Mic button tap. Context-aware:
-  ///   listening → commit the current utterance ([CallStt.requestFinal])
-  ///   thinking / speaking → barge in (cancel and loop back to listening)
-  ///   idle / error → no-op
   @override
   Future<void> tapMicButton() async {
     switch (state.step) {
@@ -134,8 +110,6 @@ class CallSession extends Notifier<CallSessionState> implements CallEngine {
     }
   }
 
-  /// Flip the "manual-EOS only" mode mid-call. State updates immediately so
-  /// the overlay rebuilds on tap; STT and config persist behind it.
   @override
   Future<void> setManualEosOnly(bool value) async {
     if (state.manualEosOnly == value) return;
@@ -374,9 +348,6 @@ class CallSession extends Notifier<CallSessionState> implements CallEngine {
     }
   }
 
-  /// Wrap a work future so it races against the per-turn cancellation
-  /// signal. If [_cancel] fires first, the returned future throws
-  /// [_BargedIn] — `finally`/`on _BargedIn` clauses in the caller do the
   /// actual cleanup.
   Future<T> _race<T>(Future<T> work) {
     final cancel = _cancel;
@@ -401,10 +372,6 @@ class CallSession extends Notifier<CallSessionState> implements CallEngine {
     if (c != null && !c.isCompleted) c.complete();
   }
 
-  /// Errors that won't get better by retrying — OS-level permission denial
-  /// and the platform not having STT at all. Message-matched because the
-  /// underlying packages throw bare [StateError]s; introducing a typed
-  /// exception would mean changing the [CallStt] interface.
   static bool _isFatalError(Object error) {
     final m = error.toString().toLowerCase();
     return m.contains('permission denied') ||
@@ -462,9 +429,6 @@ class CallSession extends Notifier<CallSessionState> implements CallEngine {
     if (!_chatStream.isClosed) unawaited(_chatStream.close());
   }
 
-  /// Drop `<details type="reasoning">` and bare `<think>...</think>` blocks
-  /// from an assistant message before piping it to TTS — we never want the
-  /// call to speak chain-of-thought.
   static String _spokenContent(String content) {
     if (content.isEmpty) return content;
     if (!content.contains('<details') &&
@@ -483,8 +447,6 @@ class CallSession extends Notifier<CallSessionState> implements CallEngine {
   }
 }
 
-/// Private exception type so the loop can distinguish user-initiated
-/// barge-in from real failures.
 class _BargedIn implements Exception {
   const _BargedIn();
 }

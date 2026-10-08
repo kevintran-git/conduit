@@ -14,7 +14,7 @@ import 'package:conduit_core/models/conversation.dart';
 import 'package:conduit_core/providers/app_providers.dart';
 import 'package:conduit_core/services/semantic_message_builder.dart';
 import 'package:conduit_core/utils/debug_logger.dart';
-import '../../../features/chat/providers/chat_providers.dart' as chat;
+import 'package:conduit_core/features/chat/providers/chat_providers.dart' as chat;
 import 'package:conduit_core/features/tools/providers/tools_providers.dart';
 import '../../config/gateway_providers.dart';
 import '../../router/gateway_router_providers.dart';
