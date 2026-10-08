@@ -1,4 +1,4 @@
-import '../../features/chat/providers/chat_providers.dart';
+import 'package:conduit_core/features/chat/providers/chat_providers.dart';
 import 'package:conduit_core/features/tools/providers/tools_providers.dart';
 import '../config/gateway_providers.dart' show realtimeCallActiveProvider;
 
