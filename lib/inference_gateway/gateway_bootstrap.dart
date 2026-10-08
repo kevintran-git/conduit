@@ -3,7 +3,7 @@ import 'package:pcm_call_audio/pcm_call_audio.dart' as pcm;
 
 import 'package:conduit_core/providers/app_providers.dart' show apiServiceProvider;
 import 'package:conduit_core/utils/debug_logger.dart';
-import '../features/chat/providers/chat_providers.dart'
+import 'package:conduit_core/features/chat/providers/chat_providers.dart'
     show imageGenerationEnabledProvider, webSearchEnabledProvider;
 import '../features/chat/providers/text_to_speech_provider.dart'
     show textToSpeechServiceProvider;
@@ -20,17 +20,8 @@ import 'config/gateway_providers.dart' show realtimeCallActiveProvider;
 import 'tools/realtime_selection_guards.dart';
 import 'voice_call/presentation/gateway_call_launcher.dart';
 
-/// ProviderScope overrides that route STT, TTS, and voice calls through
-/// the inference gateway instead of Open WebUI. Chat completions always go
-/// through Open WebUI.
 ///
-/// Kept here, rather than inline in `main.dart`, so that rebases onto upstream
-/// don't repeatedly conflict in `main.dart`. Spread this into the
-/// `ProviderScope.overrides` list with `...gatewayProviderOverrides()`.
 ///
-/// Note: the return type is intentionally left to inference — Riverpod's
-/// `Override` base type isn't part of its public export surface, so it can't
-/// be named here.
 // ignore: strict_top_level_inference
 gatewayProviderOverrides() {
   void logToDebugLogger(

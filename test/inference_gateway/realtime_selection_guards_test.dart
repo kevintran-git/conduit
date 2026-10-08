@@ -1,5 +1,5 @@
 import 'package:checks/checks.dart';
-import 'package:conduit/features/tools/providers/tools_providers.dart';
+import 'package:conduit_core/features/tools/providers/tools_providers.dart';
 import 'package:conduit/inference_gateway/config/gateway_providers.dart';
 import 'package:conduit/inference_gateway/tools/realtime_selection_guards.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
