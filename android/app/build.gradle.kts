@@ -49,8 +49,8 @@ val fcmSettingNames = listOf(
 
 android {
     namespace = "app.cogwheel.conduit"
-    compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    compileSdk = 37
+    ndkVersion = "29.0.14206865"
 
     defaultConfig {
         applicationId = "app.cogwheel.conduit"
@@ -106,18 +106,10 @@ android {
         }
     }
 
-    packaging {
-        jniLibs {
-            excludes += setOf("lib/x86/**", "lib/x86_64/**", "lib/armeabi-v7a/**")
-        }
-    }
-
     buildTypes {
         getByName("release") {
-            signingConfig = if (keystorePropertiesFile.exists()) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
+            if (keystorePropertiesFile.exists()) {
+                signingConfig = signingConfigs.getByName("release")
             }
             isMinifyEnabled = true
             isShrinkResources = true
@@ -130,7 +122,7 @@ android {
             }
         }
         getByName("debug") {
-            signingConfig = signingConfigs.getByName("debug")
+            // signingConfig = signingConfigs.getByName("debug")
             applicationIdSuffix = ".debug"
         }
     }
