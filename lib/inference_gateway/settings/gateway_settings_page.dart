@@ -20,9 +20,8 @@ import '../../shared/widgets/utility_components.dart';
 import '../config/gateway_config.dart';
 import '../config/gateway_providers.dart';
 import 'gateway_model_pickers.dart';
-import 'realtime_tuning_card.dart';
 
-enum _CallMode { conduit, pipeline, realtime }
+enum _CallMode { conduit, pipeline }
 
 typedef _Gate = ({bool inactive, String? reason});
 
@@ -42,7 +41,6 @@ class GatewaySettingsPage extends ConsumerStatefulWidget {
 class _GatewaySettingsPageState extends ConsumerState<GatewaySettingsPage> {
   late final TextEditingController _urlController;
   late final TextEditingController _keyController;
-  late final TextEditingController _callSystemPromptController;
   bool _obscureKey = true;
 
   @override
@@ -51,16 +49,12 @@ class _GatewaySettingsPageState extends ConsumerState<GatewaySettingsPage> {
     final cfg = ref.read(gatewayConfigProvider);
     _urlController = TextEditingController(text: cfg.baseUrl);
     _keyController = TextEditingController(text: cfg.apiKey);
-    _callSystemPromptController = TextEditingController(
-      text: cfg.callSystemPrompt ?? '',
-    );
   }
 
   @override
   void dispose() {
     _urlController.dispose();
     _keyController.dispose();
-    _callSystemPromptController.dispose();
     super.dispose();
   }
 
@@ -96,7 +90,6 @@ class _GatewaySettingsPageState extends ConsumerState<GatewaySettingsPage> {
   _Gate _voiceGate(GatewayConfig cfg) => _credentialsGate(cfg);
 
   _CallMode _callModeOf(GatewayConfig cfg) {
-    if (cfg.realtimeEnabled) return _CallMode.realtime;
     if (cfg.voiceEnabled) return _CallMode.pipeline;
     return _CallMode.conduit;
   }
@@ -107,13 +100,9 @@ class _GatewaySettingsPageState extends ConsumerState<GatewaySettingsPage> {
   ) async {
     switch (mode) {
       case _CallMode.conduit:
-        await notifier.setRealtimeEnabled(false);
         await notifier.setVoiceEnabled(false);
       case _CallMode.pipeline:
-        await notifier.setRealtimeEnabled(false);
         await notifier.setVoiceEnabled(true);
-      case _CallMode.realtime:
-        await notifier.setRealtimeEnabled(true);
     }
   }
 
@@ -123,27 +112,7 @@ class _GatewaySettingsPageState extends ConsumerState<GatewaySettingsPage> {
         return 'Open WebUI call.';
       case _CallMode.pipeline:
         return 'Gateway STT, chat, TTS — turn by turn.';
-      case _CallMode.realtime:
-        return 'Realtime audio stream.';
     }
-  }
-
-  _Gate _callSystemPromptGate(GatewayConfig cfg) {
-    final base = _voiceGate(cfg);
-    if (base.inactive) return base;
-    if (_callModeOf(cfg) == _CallMode.conduit) {
-      return _reasonGate('Call mode is Conduit.');
-    }
-    return _active;
-  }
-
-  _Gate _toolsGate(GatewayConfig cfg) {
-    final base = _credentialsGate(cfg);
-    if (base.inactive) return base;
-    if (!cfg.voiceEnabled && !cfg.realtimeEnabled) {
-      return _reasonGate('Enable a call mode below.');
-    }
-    return _active;
   }
 
   _Gate _ttsDefaultsGate(GatewayConfig cfg, AppSettings settings) {
@@ -160,14 +129,11 @@ class _GatewaySettingsPageState extends ConsumerState<GatewaySettingsPage> {
     ref.listen<GatewayConfig>(gatewayConfigProvider, (previous, next) {
       _hydrateIfEmpty(_urlController, next.baseUrl);
       _hydrateIfEmpty(_keyController, next.apiKey);
-      _hydrateIfEmpty(_callSystemPromptController, next.callSystemPrompt ?? '');
     });
     final cfg = ref.watch(gatewayConfigProvider);
     final settings = ref.watch(appSettingsProvider);
     final theme = context.conduitTheme;
     final notifier = ref.read(gatewayConfigProvider.notifier);
-
-    final hasCustomPrompt = (cfg.callSystemPrompt ?? '').trim().isNotEmpty;
 
     return UtilityPageScaffold.settings(
       title: 'Inference Gateway',
@@ -225,16 +191,6 @@ class _GatewaySettingsPageState extends ConsumerState<GatewaySettingsPage> {
           ),
           _ttsDefaultsGate(cfg, settings),
         ),
-        const SizedBox(height: Spacing.sm),
-        _buildToggleTile(
-          context: context,
-          icon: Icons.query_stats,
-          title: 'Usage stats tool',
-          subtitle: 'Let the model read your usage stats.',
-          value: cfg.statsToolEnabled,
-          onChanged: notifier.setStatsToolEnabled,
-          gate: _toolsGate(cfg),
-        ),
         settingsSectionGap,
         SettingsSectionHeader(title: 'Voice call'),
         const SizedBox(height: Spacing.sm),
@@ -265,13 +221,6 @@ class _GatewaySettingsPageState extends ConsumerState<GatewaySettingsPage> {
                         materialIcon: Icons.call,
                         enabled: true,
                       ),
-                      (
-                        value: _CallMode.realtime,
-                        label: 'Realtime',
-                        cupertinoIcon: CupertinoIcons.waveform,
-                        materialIcon: Icons.graphic_eq,
-                        enabled: true,
-                      ),
                     ],
                   ),
                   const SizedBox(height: Spacing.xs),
@@ -286,63 +235,6 @@ class _GatewaySettingsPageState extends ConsumerState<GatewaySettingsPage> {
             ),
           ),
           _voiceGate(cfg),
-        ),
-        if (cfg.realtimeEnabled) ...[
-          const SizedBox(height: Spacing.sm),
-          const RealtimeTuningCard(),
-        ],
-        const SizedBox(height: Spacing.sm),
-        _wrapInactive(
-          context,
-          ExpandableCard(
-            title: 'Call system prompt',
-            subtitle: hasCustomPrompt ? 'Custom' : 'Model default',
-            icon: Icons.forum_outlined,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Used when the server sends no system prompt.',
-                  style: theme.bodySmall?.copyWith(
-                    color: theme.sidebarForeground.withValues(alpha: 0.75),
-                  ),
-                ),
-                const SizedBox(height: Spacing.md),
-                ConduitInput(
-                  controller: _callSystemPromptController,
-                  hint:
-                      'You are a helpful voice assistant. Reply in plain '
-                      'conversational sentences. Be concise — no bullet points, '
-                      'no markdown, no code blocks.',
-                  maxLines: 5,
-                  textInputAction: TextInputAction.newline,
-                ),
-                const SizedBox(height: Spacing.md),
-                Row(
-                  children: [
-                    Expanded(
-                      child: ConduitButton(
-                        text: 'Save',
-                        onPressed: () async {
-                          final messenger = ScaffoldMessenger.maybeOf(context);
-                          await notifier.setCallSystemPrompt(
-                            _callSystemPromptController.text,
-                          );
-                          messenger?.showSnackBar(
-                            const SnackBar(
-                              content: Text('Call system prompt saved'),
-                              duration: Duration(seconds: 2),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          _callSystemPromptGate(cfg),
         ),
       ],
     );

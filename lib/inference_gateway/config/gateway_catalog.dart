@@ -1,6 +1,5 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:inference_kit/inference_kit.dart' as ik;
 
 import '../transport/gateway_client.dart';
 import 'gateway_providers.dart';
@@ -30,14 +29,6 @@ class GatewayCatalog {
     voices: <String>[],
   );
 }
-
-/// needs it.
-final gatewayLiveCatalogProvider = FutureProvider<ik.LiveCatalog>((ref) async {
-  final cfg = ref.watch(gatewayConfigProvider);
-  if (!cfg.hasCredentials) return ik.LiveCatalog.empty;
-  final dio = ref.read(gatewayClientProvider).dio;
-  return ik.LiveClient.fetchCatalog(dio);
-});
 
 final gatewayCatalogProvider = FutureProvider<GatewayCatalog>((ref) async {
   final cfg = ref.watch(gatewayConfigProvider);
