@@ -77,64 +77,6 @@ class GatewayConfigNotifier extends Notifier<GatewayConfig> {
     await _storage.saveVoiceManualMode(value);
   }
 
-  Future<void> setRealtimeEnabled(bool value) async {
-    state = state.copyWith(realtimeEnabled: value);
-    await _storage.saveRealtimeEnabled(value);
-  }
-
-  Future<void> setCallModel(String value) async {
-    final trimmed = value.trim();
-    state = state.copyWith(callModel: trimmed);
-    await _storage.saveCallModel(trimmed);
-  }
-
-  Future<void> setCallVoice(String value) async {
-    final trimmed = value.trim();
-    state = state.copyWith(callVoice: trimmed);
-    await _storage.saveCallVoice(trimmed);
-  }
-
-  Future<void> setCallThinkingLevel(String value) async {
-    final trimmed = value.trim().toUpperCase();
-    state = state.copyWith(callThinkingLevel: trimmed);
-    await _storage.saveCallThinkingLevel(trimmed);
-  }
-
-  Future<void> setCallPauseToleranceMs(int value) async {
-    final clamped = value.clamp(200, 3000).toInt();
-    state = state.copyWith(callPauseToleranceMs: clamped);
-    await _storage.saveCallPauseToleranceMs(clamped);
-  }
-
-  Future<void> setCallPrefixPaddingMs(int value) async {
-    final clamped = value.clamp(0, 2000).toInt();
-    state = state.copyWith(callPrefixPaddingMs: clamped);
-    await _storage.saveCallPrefixPaddingMs(clamped);
-  }
-
-  Future<void> setCallStartSensitivity(String value) async {
-    state = state.copyWith(callStartSensitivity: value);
-    await _storage.saveCallStartSensitivity(value);
-  }
-
-  Future<void> setCallEndSensitivity(String value) async {
-    state = state.copyWith(callEndSensitivity: value);
-    await _storage.saveCallEndSensitivity(value);
-  }
-
-  Future<void> setCallSystemPrompt(String? value) async {
-    final trimmed = value?.trim();
-    state = state.copyWith(
-      callSystemPrompt: (trimmed == null || trimmed.isEmpty) ? null : trimmed,
-    );
-    await _storage.saveCallSystemPrompt(trimmed);
-  }
-
-  Future<void> setStatsToolEnabled(bool value) async {
-    state = state.copyWith(statsToolEnabled: value);
-    await _storage.saveStatsToolEnabled(value);
-  }
-
   String _stripTrailingSlash(String url) {
     if (url.endsWith('/')) return url.substring(0, url.length - 1);
     return url;
@@ -164,10 +106,3 @@ final gatewayVoiceActiveProvider = Provider<bool>((ref) {
   final cfg = ref.watch(gatewayConfigProvider);
   return cfg.voiceEnabled && cfg.hasCredentials;
 });
-
-final gatewayRealtimeActiveProvider = Provider<bool>((ref) {
-  final cfg = ref.watch(gatewayConfigProvider);
-  return cfg.realtimeEnabled && cfg.hasCredentials;
-});
-
-final realtimeCallActiveProvider = Provider<bool>((ref) => false);

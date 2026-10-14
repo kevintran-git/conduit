@@ -1,5 +1,4 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:inference_kit/inference_kit.dart' as ik;
 import 'package:material_ui/material_ui.dart';
 
 import '../../shared/widgets/adaptive_dropdown_field.dart';
@@ -95,70 +94,6 @@ class GatewayTtsOptions extends ConsumerWidget {
           onChanged: notifier.setTtsVoice,
         ),
       ],
-    );
-  }
-}
-
-class GatewayCallModelField extends ConsumerWidget {
-  const GatewayCallModelField({super.key});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final cfg = ref.watch(gatewayConfigProvider);
-    final catalog = ref.watch(gatewayLiveCatalogProvider).asData?.value;
-    final models = catalog?.models ?? const <ik.LiveModel>[];
-    return _GatewayChoiceField(
-      label: 'Live model',
-      value: cfg.callModel,
-      serverDefaultLabel: 'Gateway default',
-      values: [for (final model in models) (value: model.id, label: model.id)],
-      onChanged: ref.read(gatewayConfigProvider.notifier).setCallModel,
-    );
-  }
-}
-
-class GatewayCallVoiceField extends ConsumerWidget {
-  const GatewayCallVoiceField({super.key});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final cfg = ref.watch(gatewayConfigProvider);
-    final voices = ref.watch(gatewayCatalogProvider).asData?.value.voices ??
-        const <String>[];
-    return _GatewayChoiceField(
-      label: 'Live voice',
-      value: cfg.callVoice,
-      serverDefaultLabel: 'Gateway default',
-      values: [for (final voice in voices) (value: voice, label: voice)],
-      onChanged: ref.read(gatewayConfigProvider.notifier).setCallVoice,
-    );
-  }
-}
-
-class GatewayCallThinkingLevelField extends ConsumerWidget {
-  const GatewayCallThinkingLevelField({super.key});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final cfg = ref.watch(gatewayConfigProvider);
-    final catalog = ref.watch(gatewayLiveCatalogProvider).asData?.value;
-    if (catalog == null || !catalog.supportsThinking(cfg.callModel)) {
-      return const SizedBox.shrink();
-    }
-    return Padding(
-      padding: const EdgeInsets.only(top: Spacing.md),
-      child: _GatewayChoiceField(
-        label: 'Thinking level',
-        value: cfg.callThinkingLevel,
-        serverDefaultLabel: 'Model default',
-        values: [
-          for (final level in catalog.thinkingLevels)
-            (value: level, label: level),
-        ],
-        onChanged: ref
-            .read(gatewayConfigProvider.notifier)
-            .setCallThinkingLevel,
-      ),
     );
   }
 }

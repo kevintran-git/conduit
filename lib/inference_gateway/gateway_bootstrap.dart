@@ -1,23 +1,16 @@
 import 'package:inference_kit/inference_kit.dart' as ik;
 import 'package:pcm_call_audio/pcm_call_audio.dart' as pcm;
 
-import 'package:conduit_core/providers/app_providers.dart' show apiServiceProvider;
+import 'package:conduit_core/providers/app_providers.dart'
+    show apiServiceProvider;
 import 'package:conduit_core/utils/debug_logger.dart';
-import 'package:conduit_core/features/chat/providers/chat_providers.dart'
-    show imageGenerationEnabledProvider, webSearchEnabledProvider;
+
 import '../features/chat/providers/text_to_speech_provider.dart'
     show textToSpeechServiceProvider;
 import '../features/chat/voice_call/presentation/voice_call_launcher.dart'
     show voiceCallLauncherProvider;
-import 'package:conduit_core/features/tools/providers/tools_providers.dart'
-    show
-        selectedFilterIdsProvider,
-        selectedTerminalIdProvider,
-        selectedToolIdsProvider;
 import 'api/gateway_api_provider.dart';
 import 'chat_tts/gateway_text_to_speech_service.dart';
-import 'config/gateway_providers.dart' show realtimeCallActiveProvider;
-import 'tools/realtime_selection_guards.dart';
 import 'voice_call/presentation/gateway_call_launcher.dart';
 
 ///
@@ -50,15 +43,5 @@ gatewayProviderOverrides() {
     apiServiceProvider.overrideWith(gatewayApiServiceProviderOverride),
     voiceCallLauncherProvider.overrideWith((ref) => GatewayCallLauncher(ref)),
     textToSpeechServiceProvider.overrideWith(createGatewayTextToSpeechService),
-    realtimeCallActiveProvider.overrideWith(
-      (ref) => ref.watch(gatewayRealtimeCallActiveProvider),
-    ),
-    selectedToolIdsProvider.overrideWith(GatewayGuardedToolIds.new),
-    selectedFilterIdsProvider.overrideWith(GatewayGuardedFilterIds.new),
-    selectedTerminalIdProvider.overrideWith(GatewayGuardedTerminalId.new),
-    webSearchEnabledProvider.overrideWith(GatewayGuardedWebSearchEnabled.new),
-    imageGenerationEnabledProvider.overrideWith(
-      GatewayGuardedImageGenerationEnabled.new,
-    ),
   ];
 }
