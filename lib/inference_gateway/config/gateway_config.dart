@@ -12,7 +12,7 @@ class GatewayConfig {
     this.sttModel = '',
   });
 
-  static const String defaultBaseUrl = 'https://api.kvt.codes';
+  static const String defaultBaseUrl = 'https://api.kvtr.tech';
 
   static const String unsetModel = '';
 
