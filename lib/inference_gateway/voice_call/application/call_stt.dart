@@ -8,48 +8,34 @@ import 'package:conduit_core/utils/debug_logger.dart';
 import '../../../features/chat/services/native_stt_service.dart';
 import '../../config/gateway_config.dart';
 
-/// Single event surfaced from either STT impl.
 class SttEvent {
   const SttEvent({required this.text, required this.isFinal});
   final String text;
   final bool isFinal;
 }
 
-/// One STT impl per call. The session never branches on which one is
-/// active — it just consumes [events] and calls [requestFinal] when the user
-/// taps the mic button.
 abstract class CallStt {
-  /// Cumulative partial + (eventually) one final event per utterance.
-  /// Closes when [stop] / [dispose] is called or the underlying source
-  /// terminates.
   Stream<SttEvent> get events;
 
-  /// Open the mic / WS / native recognizer. Resolves once the engine is
-  /// ready to receive audio (or throws on permission / connect failure).
   Future<void> start();
 
-  /// Ask the engine to wrap up the current utterance and emit one final
-  /// event. The user tapping the mic button in `listening` lands here.
   Future<void> requestFinal();
 
-  /// Stop capturing audio without disposing the engine.
   Future<void> stop();
 
   Future<void> dispose();
 
-  /// Toggle for "manual-EOS only" mode. When true, server / platform
-  /// auto-EOS is suppressed — only [requestFinal] can produce a final
-  /// event. Safe to flip mid-listen: gateway path applies immediately
-  /// (next `is_final` from the server is demoted to partial); device path
-  /// applies on the next [start] (current listen retains its original
-  /// `pauseFor`).
   bool get manualEosOnly;
   set manualEosOnly(bool value);
 }
 
 class DeviceCallStt implements CallStt {
-  DeviceCallStt({required this.pauseFor, required bool manualEosOnly})
-    : _manualEosOnly = manualEosOnly;
+  DeviceCallStt({
+    required this.pauseFor,
+    required bool manualEosOnly,
+    NativeSttService? stt,
+  }) : _manualEosOnly = manualEosOnly,
+       _stt = stt ?? NativeSttService();
 
   final Duration pauseFor;
 
@@ -59,7 +45,7 @@ class DeviceCallStt implements CallStt {
   @override
   set manualEosOnly(bool value) => _manualEosOnly = value;
 
-  final NativeSttService _stt = NativeSttService();
+  final NativeSttService _stt;
   final StreamController<SttEvent> _events =
       StreamController<SttEvent>.broadcast();
   StreamSubscription<NativeSttEvent>? _sttSub;
@@ -227,14 +213,6 @@ class DeviceCallStt implements CallStt {
   }
 }
 
-/// Captures 16 kHz / 16-bit / mono PCM and streams it to the gateway's
-/// `/ws/audio/transcribe` endpoint. Server `is_final` events become final
-/// SttEvents — unless [manualEosOnly] is set, in which case they're demoted
-/// to partials and only [requestFinal] can produce a true final.
-///
-/// No client-side RMS VAD. The server (Chirp 3) is the EOS authority; RMS
-/// can't distinguish speech from road noise and would false-trigger in
-/// loud environments.
 class GatewayCallStt implements CallStt {
   GatewayCallStt({required this.config, required bool manualEosOnly})
     : _manualEosOnly = manualEosOnly;
@@ -261,9 +239,6 @@ class GatewayCallStt implements CallStt {
   bool _disposed = false;
   bool _capturing = false;
 
-  /// True between [requestFinal] being called and the next `is_final`
-  /// event arriving. While set, the next server final is emitted as a real
-  /// final even in [manualEosOnly] mode.
   bool _pendingManualFinal = false;
 
   @override

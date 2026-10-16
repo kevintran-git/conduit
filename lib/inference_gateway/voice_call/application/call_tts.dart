@@ -6,8 +6,6 @@ import 'package:inference_kit/inference_kit.dart' as ik;
 import 'package:conduit_core/utils/debug_logger.dart';
 import '../../config/gateway_config.dart';
 
-/// Coarse pipeline state for [CallTts]. Surfaced via [CallTts.status] so
-/// the UI can render "what's the TTS doing right now."
 enum TtsStage { idle, connecting, waiting, playing, drained, stopped, error }
 
 class TtsStatus {
@@ -50,22 +48,22 @@ class TtsStatus {
   }
 }
 
-/// Streaming TTS for the call surface. One [ElevenLabsTtsSession] per turn;
-/// PCM frames are pumped through a shared [PcmStreamSpeaker]. No HTTP
-/// proxy, no WAV header trickery, no decoder layer, no timeouts.
 class CallTts {
-  CallTts({required this.client, required this.config})
-    : _speaker = PcmStreamSpeaker(
-        iosAudioCategory: IosAudioCategory.playAndRecord,
-        logScope: 'call/tts',
-      );
+  CallTts({
+    required this.client,
+    required this.config,
+    PcmStreamSpeaker? speaker,
+  }) : _speaker =
+           speaker ??
+           PcmStreamSpeaker(
+             iosAudioCategory: IosAudioCategory.playAndRecord,
+             logScope: 'call/tts',
+           );
 
   final ik.ElevenLabsTtsClient client;
   final GatewayConfig config;
   final PcmStreamSpeaker _speaker;
 
-  /// Speaker hardware-flush pad before the mic reopens. Without it the mic
-  /// catches the tail of the speaker on iOS/Android.
   static const Duration _speakerDrainDelay = Duration(milliseconds: 250);
 
   bool _disposed = false;
@@ -90,8 +88,6 @@ class CallTts {
   Stream<TtsStatus> get statusStream => _statusController.stream;
   Stream<bool> get playing => _playingController.stream;
 
-  /// Open a fresh WS session. Fire-and-forget — text appended before the
-  /// handshake completes is buffered and drained after the WS opens.
   Future<void> open() {
     if (_disposed) return Future.value();
     return _openInFlight ??= _doOpen();
@@ -158,7 +154,6 @@ class CallTts {
     }
   }
 
-  /// Pipe a token in. Buffered if the WS is still opening.
   void append(String text) {
     if (_disposed || text.isEmpty) return;
     final session = _session;
@@ -169,8 +164,6 @@ class CallTts {
     session.appendText(text, triggerGeneration: true);
   }
 
-  /// Tell the server we're done emitting text. Deferred if the WS is still
-  /// opening so it fires right after buffered text is flushed through.
   void flush() {
     if (_disposed) return;
     final session = _session;
@@ -181,14 +174,6 @@ class CallTts {
     session.flush();
   }
 
-  /// Resolves when the current response's audio has fully drained — server
-  /// closed AND platform buffer empty. Adds a 250ms speaker-flush pad so
-  /// the mic can reopen without acoustic feedback.
-  ///
-  /// If [open] is still running, awaits it first so we don't no-op past a
-  /// slow handshake. If the open failed (no _streamFuture), throws the
-  /// captured open error so the caller surfaces a visible failure instead
-  /// of silently returning and reopening the mic to silence.
   Future<void> awaitDrain() async {
     final pendingOpen = _openInFlight;
     if (pendingOpen != null) {
@@ -223,10 +208,6 @@ class CallTts {
     await Future.delayed(_speakerDrainDelay);
   }
 
-  /// Cancel the in-flight response (barge-in or hangup). Hard-flushes the
-  /// native audio buffer so playback stops *now* — flutter_pcm_sound has no
-  /// pause primitive, so we have to release/re-setup the engine to actually
-  /// cut a buffered tail. Next [open] will re-setup it lazily.
   Future<void> stop() async {
     if (_disposed) return;
     _stopping = true;
@@ -248,10 +229,6 @@ class CallTts {
     }
   }
 
-  /// Shared session/stream/playing cleanup. Caller decides whether to
-  /// hard-flush the speaker (true = barge-in / hangup, where we need
-  /// playback to cut now; false = next-turn handoff, where keeping the
-  /// engine warm saves ~tens of ms of setup latency).
   Future<void> _close({required bool hardFlush}) async {
     await _speaker.stop(hardFlush: hardFlush);
     await _session?.dispose();
