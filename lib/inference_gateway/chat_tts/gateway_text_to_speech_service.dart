@@ -15,10 +15,11 @@ import '../../features/chat/services/tts_manager.dart';
 import '../../features/chat/voice_mode/chat_voice_mode_controller.dart';
 import '../config/gateway_providers.dart';
 import '../router/gateway_router_providers.dart';
+import '../read_aloud/presentation/read_aloud_overlay.dart';
+import '../read_aloud/read_aloud_engine.dart';
+import '../read_aloud/speech_text.dart';
 import 'gateway_chat_tts_speaker.dart';
 
-///
-///
 class GatewayTextToSpeechService extends TextToSpeechService {
   GatewayTextToSpeechService({
     required Ref ref,
@@ -30,6 +31,11 @@ class GatewayTextToSpeechService extends TextToSpeechService {
   final Ref _ref;
   GatewayChatTtsSpeaker? _speaker;
   ik.ElevenLabsTtsClient? _speakerClient;
+  ReadAloudEngine? _engine;
+  ik.ElevenLabsTtsClient? _engineClient;
+  ReadAloudOverlayHost? _overlay;
+
+  final ValueNotifier<ReadAloudSnapshot?> readAloud = ValueNotifier(null);
 
   VoidCallback? _onStart;
   VoidCallback? _onComplete;
@@ -37,8 +43,15 @@ class GatewayTextToSpeechService extends TextToSpeechService {
   VoidCallback? _onPause;
   VoidCallback? _onContinue;
   void Function(String message)? _onError;
+  void Function(int sentenceIndex)? _onSentenceIndex;
+  void Function(int start, int end)? _onWordProgress;
+
+  int _lastPart = -1;
+  bool _pauseNotified = false;
 
   bool get _gatewayActive => _ref.read(gatewayTtsActiveProvider);
+
+  bool get _readAloudActive => _engine?.isActive ?? false;
 
   GatewayChatTtsSpeaker _ensureSpeaker() {
     final liveClient = _ref.read(gatewayElevenLabsClientProvider);
@@ -51,6 +64,60 @@ class GatewayTextToSpeechService extends TextToSpeechService {
       client: liveClient,
       config: _ref.read(gatewayConfigProvider),
     );
+  }
+
+  Future<ReadAloudEngine> _ensureEngine() async {
+    final liveClient = _ref.read(gatewayElevenLabsClientProvider);
+    final stale = _engine;
+    if (stale != null && !identical(_engineClient, liveClient)) {
+      _engine = null;
+      await stale.dispose();
+      readAloud.value = null;
+    }
+    _engineClient = liveClient;
+    final existing = _engine;
+    if (existing != null) return existing;
+    final engine = ReadAloudEngine(client: liveClient);
+    engine.onStarted = () => _onStart?.call();
+    engine.onStatus = _handleReadAloudStatus;
+    engine.onCompleted = () {
+      _lastPart = -1;
+      _onComplete?.call();
+      _releaseWakelockIfIdle();
+    };
+    engine.onError = (message) {
+      _lastPart = -1;
+      _onError?.call(message);
+      _releaseWakelockIfIdle();
+    };
+    engine.onWord = (part, start, end) {
+      if (part != _lastPart) {
+        _lastPart = part;
+        _onSentenceIndex?.call(part);
+      }
+      _onWordProgress?.call(start, end);
+    };
+    engine.snapshot.addListener(() {
+      if (identical(_engine, engine)) readAloud.value = engine.snapshot.value;
+    });
+    return _engine = engine;
+  }
+
+  void _handleReadAloudStatus(ReadAloudStatus status) {
+    switch (status) {
+      case ReadAloudStatus.playing:
+        unawaited(WakelockPlus.enable());
+        if (_pauseNotified) {
+          _pauseNotified = false;
+          _onContinue?.call();
+        }
+      case ReadAloudStatus.paused:
+        _pauseNotified = true;
+        _onPause?.call();
+        _releaseWakelockIfIdle();
+      case ReadAloudStatus.loading:
+        break;
+    }
   }
 
   @override
@@ -70,6 +137,8 @@ class GatewayTextToSpeechService extends TextToSpeechService {
     _onPause = onPause;
     _onContinue = onContinue;
     _onError = onError;
+    _onSentenceIndex = onSentenceIndex;
+    _onWordProgress = onDeviceWordProgress;
     super.bindHandlers(
       onStart: onStart,
       onComplete: onComplete,
@@ -85,9 +154,8 @@ class GatewayTextToSpeechService extends TextToSpeechService {
   @override
   Future<void> speak(String text) async {
     if (!_gatewayActive) {
-      if (_speaker != null) {
-        await _speaker!.stop();
-      }
+      await _speaker?.stop();
+      await _engine?.stop();
       await super.speak(text);
       return;
     }
@@ -99,17 +167,21 @@ class GatewayTextToSpeechService extends TextToSpeechService {
       scope: 'gateway/chat-tts',
       data: {'text_len': text.length},
     );
+    await _speaker?.stop();
+    final config = _ref.read(gatewayConfigProvider);
+    _lastPart = -1;
+    _pauseNotified = false;
+    _overlay ??= ReadAloudOverlayHost(service: this);
     unawaited(WakelockPlus.enable());
-    try {
-      await _ensureSpeaker().play(
-        text,
-        onStart: _onStart,
-        onComplete: _onComplete,
-        onError: _onError,
-      );
-    } finally {
-      _releaseWakelockIfIdle();
-    }
+    final engine = await _ensureEngine();
+    await engine.play(
+      text: text,
+      parts: splitTextForSpeech(text),
+      voice: config.ttsVoice,
+      model: config.ttsModel,
+      pronunciations: parsePronunciations(config.ttsPronunciations),
+    );
+    if (!engine.isActive) _releaseWakelockIfIdle();
   }
 
   @override
@@ -119,6 +191,7 @@ class GatewayTextToSpeechService extends TextToSpeechService {
       return;
     }
     DebugLogger.log('stream-start-via-gateway', scope: 'gateway/chat-tts');
+    await _engine?.stop();
     unawaited(WakelockPlus.enable());
     await _ensureSpeaker().startStream(
       onStart: _onStart,
@@ -169,8 +242,11 @@ class GatewayTextToSpeechService extends TextToSpeechService {
 
   @override
   Future<void> stop() async {
-    if (_speaker != null) {
-      await _speaker!.stop();
+    if (_speaker != null || _engine != null) {
+      await _engine?.stop();
+      await _speaker?.stop();
+      _lastPart = -1;
+      _pauseNotified = false;
       _onCancel?.call();
       _releaseWakelockIfIdle();
     }
@@ -179,9 +255,13 @@ class GatewayTextToSpeechService extends TextToSpeechService {
 
   @override
   Future<void> pause() async {
-    if (_gatewayActive && _speaker != null) {
-      await _speaker!.pause();
-      _onPause?.call();
+    if (_readAloudActive) {
+      await _engine!.pause();
+      return;
+    }
+    if (_gatewayActive && (_speaker?.isStreaming ?? false)) {
+      await _speaker!.stop();
+      _onCancel?.call();
       _releaseWakelockIfIdle();
       return;
     }
@@ -190,50 +270,35 @@ class GatewayTextToSpeechService extends TextToSpeechService {
 
   @override
   Future<void> resume() async {
-    if (_gatewayActive && _speaker != null) {
-      _onContinue?.call();
+    if (_readAloudActive) {
       unawaited(WakelockPlus.enable());
-      try {
-        await _speaker!.resume();
-      } finally {
-        _releaseWakelockIfIdle();
-      }
+      await _engine!.resume();
       return;
     }
+    if (_gatewayActive) return;
     await super.resume();
   }
 
+  bool get readAloudPaused => _engine?.isPaused ?? false;
+
+  Future<void> togglePause() => readAloudPaused ? resume() : pause();
+
   Future<void> seek(Duration position) async {
-    if (!_gatewayActive) return;
-    await _speaker?.seek(position);
+    await _engine?.seekTo(position);
   }
 
-  Future<void> restart(String text) async {
-    if (!_gatewayActive) {
-      await super.speak(text);
-      return;
-    }
-    unawaited(WakelockPlus.enable());
-    try {
-      await _ensureSpeaker().restart(
-        text,
-        onStart: _onStart,
-        onComplete: _onComplete,
-        onError: _onError,
-      );
-    } finally {
-      _releaseWakelockIfIdle();
-    }
+  Future<void> skipBy(Duration delta) async {
+    await _engine?.skipBy(delta);
   }
 
-  Future<Duration?> storedPositionFor(String text) async {
-    if (!_gatewayActive) return null;
-    return _ensureSpeaker().storedPositionFor(text);
+  Future<void> skipSegments(int delta) async {
+    await _engine?.skipSegments(delta);
   }
 
-  Duration get gatewayPosition => _speaker?.position ?? Duration.zero;
-
-  bool get gatewayPaused => _speaker?.isPaused ?? false;
+  Future<void> playSegment(int segment, {int word = 0}) async {
+    if (_engine?.isPaused ?? false) unawaited(WakelockPlus.enable());
+    await _engine?.playSegment(segment, word: word);
+  }
 
   @override
   Future<List<Map<String, dynamic>>> getAvailableVoices() async {
@@ -246,8 +311,14 @@ class GatewayTextToSpeechService extends TextToSpeechService {
 
   @override
   Future<void> dispose() async {
+    _overlay?.dispose();
+    _overlay = null;
     await _speaker?.dispose();
     _speaker = null;
+    final engine = _engine;
+    _engine = null;
+    await engine?.dispose();
+    readAloud.dispose();
     await super.dispose();
   }
 }

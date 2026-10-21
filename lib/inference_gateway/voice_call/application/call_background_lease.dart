@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import '../../../core/services/background_streaming_handler.dart';
+
 import 'package:conduit_core/utils/debug_logger.dart';
 
 class CallBackgroundLease {

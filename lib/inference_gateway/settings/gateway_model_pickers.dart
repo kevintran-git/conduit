@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../shared/widgets/adaptive_dropdown_field.dart';
 import '../../shared/theme/theme_extensions.dart';
+import '../../shared/widgets/conduit_components.dart';
 import '../config/gateway_catalog.dart';
 import '../config/gateway_providers.dart';
 
@@ -93,7 +94,47 @@ class GatewayTtsOptions extends ConsumerWidget {
           values: [for (final voice in voices) (value: voice, label: voice)],
           onChanged: notifier.setTtsVoice,
         ),
+        const SizedBox(height: Spacing.md),
+        _PronunciationField(
+          initial: cfg.ttsPronunciations,
+          onChanged: notifier.setTtsPronunciations,
+        ),
       ],
+    );
+  }
+}
+
+class _PronunciationField extends StatefulWidget {
+  const _PronunciationField({required this.initial, required this.onChanged});
+
+  final String initial;
+  final ValueChanged<String> onChanged;
+
+  @override
+  State<_PronunciationField> createState() => _PronunciationFieldState();
+}
+
+class _PronunciationFieldState extends State<_PronunciationField> {
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.initial,
+  );
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ConduitInput(
+      label: 'Pronunciations',
+      hint: 'One word=spoken form per line',
+      controller: _controller,
+      minLines: 2,
+      maxLines: 6,
+      keyboardType: TextInputType.multiline,
+      onChanged: widget.onChanged,
     );
   }
 }

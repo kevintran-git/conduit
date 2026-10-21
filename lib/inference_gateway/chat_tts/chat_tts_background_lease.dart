@@ -1,18 +1,9 @@
 import 'dart:async';
 
 import '../../core/services/background_streaming_handler.dart';
+
 import 'package:conduit_core/utils/debug_logger.dart';
 
-/// This component maintains a lease for chat background audio while text-to-speech is active.
-/// The Android version of this software operates the dataSync foreground service.
-/// Audio playback continues even when the application is sent to the background or the screen is locked.
-/// Since there is no microphone, the iOS platform is responsible for managing the audio session externally.
-/// When lease acquisition fails, playback is never interrupted.
-///
-/// The wake lock is a native service that refreshes itself.
-/// An expiry event triggers the keepalive.
-/// There is no timer.
-/// Releasing the wake lock restores chained callbacks.
 class ChatTtsBackgroundLease {
   ChatTtsBackgroundLease({String? leaseId})
     : _leaseId =
@@ -35,10 +26,9 @@ class ChatTtsBackgroundLease {
     await bg.setExternalAudioSessionOwner(true);
     _chainExpiryHandlers(bg);
     try {
-      await bg.startBackgroundExecution(
-        [_leaseId],
-        kind: BackgroundStreamKind.chat,
-      );
+      await bg.startBackgroundExecution([
+        _leaseId,
+      ], kind: BackgroundStreamKind.chat);
     } catch (error, stackTrace) {
       DebugLogger.error(
         'background-start-failed',
