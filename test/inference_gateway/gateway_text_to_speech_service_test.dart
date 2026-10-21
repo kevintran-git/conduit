@@ -3,7 +3,6 @@ import 'package:conduit/features/chat/voice_mode/chat_voice_mode_controller.dart
 import 'package:conduit/inference_gateway/chat_tts/gateway_text_to_speech_service.dart';
 import 'package:conduit/inference_gateway/config/gateway_config.dart';
 import 'package:conduit/inference_gateway/config/gateway_providers.dart';
-import 'package:conduit_core/voice/voice_session.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';

@@ -1,4 +1,3 @@
-///
 class GatewayConfig {
   const GatewayConfig({
     required this.baseUrl,
@@ -10,6 +9,7 @@ class GatewayConfig {
     required this.ttsVoice,
     required this.voiceManualMode,
     this.sttModel = '',
+    this.ttsPronunciations = '',
   });
 
   static const String defaultBaseUrl = 'https://api.kvtr.tech';
@@ -43,6 +43,7 @@ class GatewayConfig {
 
   final String ttsModel;
   final String ttsVoice;
+  final String ttsPronunciations;
 
   final bool voiceManualMode;
 
@@ -59,6 +60,7 @@ class GatewayConfig {
     String? sttModel,
     String? ttsModel,
     String? ttsVoice,
+    String? ttsPronunciations,
     bool? voiceManualMode,
   }) {
     return GatewayConfig(
@@ -70,6 +72,7 @@ class GatewayConfig {
       sttModel: sttModel ?? this.sttModel,
       ttsModel: ttsModel ?? this.ttsModel,
       ttsVoice: ttsVoice ?? this.ttsVoice,
+      ttsPronunciations: ttsPronunciations ?? this.ttsPronunciations,
       voiceManualMode: voiceManualMode ?? this.voiceManualMode,
     );
   }
@@ -86,6 +89,7 @@ class GatewayConfig {
         other.sttModel == sttModel &&
         other.ttsModel == ttsModel &&
         other.ttsVoice == ttsVoice &&
+        other.ttsPronunciations == ttsPronunciations &&
         other.voiceManualMode == voiceManualMode;
   }
 
@@ -99,6 +103,7 @@ class GatewayConfig {
     sttModel,
     ttsModel,
     ttsVoice,
+    ttsPronunciations,
     voiceManualMode,
   ]);
 }

@@ -9,7 +9,9 @@ import 'package:conduit_core/providers/app_providers.dart';
 import 'package:conduit_core/services/settings_service.dart';
 import 'package:conduit_core/utils/debug_logger.dart';
 import 'package:conduit_markdown/conduit_markdown.dart';
-import 'package:conduit_core/features/chat/providers/chat_providers.dart' as chat;
+import 'package:conduit_core/features/chat/providers/chat_providers.dart'
+    as chat;
+
 import '../../config/gateway_providers.dart';
 import '../../router/gateway_router_providers.dart';
 import '../domain/call_step.dart';
@@ -18,15 +20,12 @@ import 'call_engine.dart';
 import 'call_stt.dart';
 import 'call_tts.dart';
 
-///
-///
 class CallSession extends Notifier<CallSessionState> implements CallEngine {
   CallStt? _stt;
   CallTts? _tts;
   StreamSubscription<bool>? _ttsPlayingSub;
   StreamSubscription<TtsStatus>? _ttsStatusSub;
 
-  /// [_teardown].
   CallBackgroundLease? _backgroundLease;
 
   final StreamController<List<ChatMessage>> _chatStream =
@@ -348,7 +347,6 @@ class CallSession extends Notifier<CallSessionState> implements CallEngine {
     }
   }
 
-  /// actual cleanup.
   Future<T> _race<T>(Future<T> work) {
     final cancel = _cancel;
     if (cancel == null) return work;

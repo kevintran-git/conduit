@@ -1,4 +1,3 @@
-import 'dart:async';
 
 import 'package:checks/checks.dart';
 import 'package:conduit/inference_gateway/config/gateway_config.dart';

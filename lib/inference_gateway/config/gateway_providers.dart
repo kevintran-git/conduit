@@ -5,7 +5,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'gateway_config.dart';
 import 'gateway_storage.dart';
 
-///
 class GatewayConfigNotifier extends Notifier<GatewayConfig> {
   late GatewayStorage _storage;
 
@@ -70,6 +69,11 @@ class GatewayConfigNotifier extends Notifier<GatewayConfig> {
     final trimmed = value.trim();
     state = state.copyWith(ttsVoice: trimmed);
     await _storage.saveTtsVoice(trimmed);
+  }
+
+  Future<void> setTtsPronunciations(String value) async {
+    state = state.copyWith(ttsPronunciations: value);
+    await _storage.saveTtsPronunciations(value);
   }
 
   Future<void> setVoiceManualMode(bool value) async {

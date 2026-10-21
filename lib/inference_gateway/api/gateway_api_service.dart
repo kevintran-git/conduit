@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:conduit_core/services/api_service.dart';
+
 import '../router/gateway_inference_router.dart';
 
 class GatewayApiService extends ApiService {
