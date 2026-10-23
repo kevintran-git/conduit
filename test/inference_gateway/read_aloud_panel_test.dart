@@ -46,67 +46,101 @@ ReadAloudSnapshot _snapshot(
   failed: failed,
 );
 
+Future<GatewayTextToSpeechService> _pumpPanel(WidgetTester tester) async {
+  late GatewayTextToSpeechService service;
+  await tester.pumpWidget(
+    ProviderScope(
+      child: Consumer(
+        builder: (context, ref, _) {
+          service = ref.watch(_serviceProvider);
+          return MaterialApp(
+            theme: AppTheme.light(TweakcnThemes.t3Chat),
+            home: ReadAloudPanel(service: service, onCollapse: () {}),
+          );
+        },
+      ),
+    ),
+  );
+  return service;
+}
+
+Map<Key, RichText> _paragraphs(WidgetTester tester) => {
+  for (final rich in tester.widgetList<RichText>(find.byType(RichText)))
+    if (rich.key is GlobalKey) rich.key!: rich,
+};
+
+List<Key> _changed(Map<Key, RichText> before, Map<Key, RichText> after) => [
+  for (final entry in after.entries)
+    if (before[entry.key] != null && !identical(before[entry.key], entry.value))
+      entry.key,
+];
+
 void main() {
   testWidgets('progress ticks rebuild only the paragraph being read', (
     tester,
   ) async {
     final plan = _plan(40, 5);
-    late GatewayTextToSpeechService service;
-    await tester.pumpWidget(
-      ProviderScope(
-        child: Consumer(
-          builder: (context, ref, _) {
-            service = ref.watch(_serviceProvider);
-            return MaterialApp(
-              theme: AppTheme.light(TweakcnThemes.t3Chat),
-              home: ReadAloudPanel(service: service, onCollapse: () {}),
-            );
-          },
-        ),
-      ),
-    );
-
-    List<RichText> paragraphs() => tester
-        .widgetList<RichText>(find.byType(RichText))
-        .where((rich) => rich.key is GlobalKey)
-        .toList();
+    final service = await _pumpPanel(tester);
 
     service.readAloud.value = _snapshot(plan, segment: 0);
     await tester.pump();
-    final before = paragraphs();
-    expect(before, hasLength(40));
+    final before = _paragraphs(tester);
+    expect(before.length, lessThan(40));
 
     service.readAloud.value = _snapshot(plan, segment: 1, word: 2);
     await tester.pump();
-    var after = paragraphs();
-    final changed = [
-      for (var i = 0; i < before.length; i++)
-        if (!identical(before[i], after[i])) i,
-    ];
-    expect(changed, hasLength(1));
+    final after = _paragraphs(tester);
+    expect(_changed(before, after), hasLength(1));
 
     service.readAloud.value = _snapshot(plan, segment: 5, failed: {12});
     await tester.pump();
-    final moved = paragraphs();
-    final movedChanged = [
-      for (var i = 0; i < after.length; i++)
-        if (!identical(after[i], moved[i])) i,
-    ];
-    expect(movedChanged, hasLength(3));
-    after = moved;
+    final moved = _paragraphs(tester);
+    expect(_changed(after, moved), hasLength(3));
 
-    final current = (after[1].text as TextSpan).children!.cast<TextSpan>();
+    final ordered = moved.values.toList();
+    final current = (ordered[1].text as TextSpan).children!.cast<TextSpan>();
     expect(
       current.where((span) => span.style?.backgroundColor != null),
       isNotEmpty,
     );
-    final failed = (after[2].text as TextSpan).children!.cast<TextSpan>();
+    final failed = (ordered[2].text as TextSpan).children!.cast<TextSpan>();
     expect(
       failed.where(
         (span) => span.style?.decoration == TextDecoration.underline,
       ),
       isNotEmpty,
     );
+
+    service.readAloud.value = null;
+    await tester.pump();
+  });
+
+  testWidgets('a long note builds only nearby paragraphs and follows far', (
+    tester,
+  ) async {
+    final plan = _plan(2000, 5);
+    final service = await _pumpPanel(tester);
+
+    service.readAloud.value = _snapshot(plan, segment: 0);
+    await tester.pump();
+    expect(_paragraphs(tester).length, lessThan(40));
+
+    service.readAloud.value = _snapshot(plan, segment: 1500 * 5);
+    await tester.pumpAndSettle();
+    final built = _paragraphs(tester);
+    expect(built.length, lessThan(40));
+    final highlighted = built.values.where(
+      (rich) => (rich.text as TextSpan).children!.cast<TextSpan>().any(
+        (span) => span.style?.backgroundColor != null,
+      ),
+    );
+    expect(highlighted, hasLength(1));
+    final box = tester.renderObject<RenderBox>(
+      find.byWidget(highlighted.single),
+    );
+    final top = box.localToGlobal(Offset.zero).dy;
+    expect(top, greaterThanOrEqualTo(0));
+    expect(top, lessThan(600));
 
     service.readAloud.value = null;
     await tester.pump();

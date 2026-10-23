@@ -22,6 +22,9 @@ String formatReadAloudSpeed(double speed) {
 
 enum _Sheet { none, speed, voices }
 
+const double _paragraphGapWeight = 60;
+const int _maxRevealAttempts = 4;
+
 class ReadAloudPanel extends StatefulWidget {
   const ReadAloudPanel({
     super.key,
@@ -190,6 +193,9 @@ class _ReadAloudTextState extends State<_ReadAloudText> {
   List<_Paragraph> _paragraphs = const [];
   List<GlobalKey> _keys = const [];
   final Map<int, int> _paragraphOfPart = {};
+  final Map<int, int> _slotOfPart = {};
+  List<double> _paragraphWeightStarts = const [];
+  double _totalWeight = 0;
   List<Widget?> _built = const [];
   List<Object?> _builtSignature = const [];
   TextStyle? _builtStyle;
@@ -226,6 +232,7 @@ class _ReadAloudTextState extends State<_ReadAloudText> {
     final paragraphs = <_Paragraph>[];
     final buffers = <StringBuffer>[];
     _paragraphOfPart.clear();
+    _slotOfPart.clear();
     for (var p = 0; p < plan.parts.length; p++) {
       if (paragraphs.isEmpty || plan.paragraphStarts.contains(p)) {
         paragraphs.add(_Paragraph([]));
@@ -234,14 +241,21 @@ class _ReadAloudTextState extends State<_ReadAloudText> {
       final paragraph = paragraphs.last;
       final buffer = buffers.last;
       if (buffer.isNotEmpty) buffer.write(' ');
+      _slotOfPart[p] = paragraph.parts.length;
       paragraph.partStarts.add(buffer.length);
       buffer.write(plan.parts[p]);
       paragraph.parts.add(p);
       _paragraphOfPart[p] = paragraphs.length - 1;
     }
+    final weightStarts = <double>[];
+    var weight = 0.0;
     for (var i = 0; i < paragraphs.length; i++) {
       paragraphs[i].text = buffers[i].toString();
+      weightStarts.add(weight);
+      weight += paragraphs[i].text.length + _paragraphGapWeight;
     }
+    _paragraphWeightStarts = weightStarts;
+    _totalWeight = weight;
     for (final segment in plan.segments) {
       final p = _paragraphOfPart[segment.partIndex];
       if (p != null) paragraphs[p].segments.add(segment.index);
@@ -261,18 +275,60 @@ class _ReadAloudTextState extends State<_ReadAloudText> {
     final p = _paragraphOfPart[segment.partIndex];
     if (p == null) return null;
     final paragraph = _paragraphs[p];
-    final base =
-        paragraph.partStarts[paragraph.parts.indexOf(segment.partIndex)];
+    final base = paragraph.partStarts[_slotOfPart[segment.partIndex]!];
     return (paragraph: p, start: base + segment.start, end: base + segment.end);
   }
 
-  void _reveal({bool jump = false}) {
+  double _estimateOffset(int paragraph) {
+    final position = _scroll.position;
+    var pixelsPerWeight = position.maxScrollExtent / _totalWeight;
+    ({int index, double offset})? first;
+    ({int index, double offset})? last;
+    for (var i = 0; i < _keys.length; i++) {
+      final render = _keys[i].currentContext?.findRenderObject();
+      if (render is! RenderBox || !render.attached) continue;
+      final viewport = RenderAbstractViewport.maybeOf(render);
+      if (viewport == null) continue;
+      final anchor = (
+        index: i,
+        offset: viewport.getOffsetToReveal(render, 0).offset,
+      );
+      first ??= anchor;
+      last = anchor;
+    }
+    if (first == null || last == null) {
+      return pixelsPerWeight * _paragraphWeightStarts[paragraph];
+    }
+    final span =
+        _paragraphWeightStarts[last.index] -
+        _paragraphWeightStarts[first.index];
+    if (span > 0) pixelsPerWeight = (last.offset - first.offset) / span;
+    final anchor = paragraph < first.index ? first : last;
+    return anchor.offset +
+        (_paragraphWeightStarts[paragraph] -
+                _paragraphWeightStarts[anchor.index]) *
+            pixelsPerWeight;
+  }
+
+  void _reveal({bool jump = false, int attempt = 0}) {
     if (!mounted || !_scroll.hasClients) return;
     final index = widget.snapshot.segment;
     final range = _segmentRange(index);
     if (range == null) return;
     final render = _keys[range.paragraph].currentContext?.findRenderObject();
-    if (render is! RenderParagraph || !render.attached) return;
+    if (render is! RenderParagraph || !render.attached) {
+      if (attempt >= _maxRevealAttempts || _totalWeight <= 0) return;
+      final position = _scroll.position;
+      _scroll.jumpTo(
+        _estimateOffset(range.paragraph)
+            .clamp(position.minScrollExtent, position.maxScrollExtent),
+      );
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _reveal(jump: jump, attempt: attempt + 1),
+      );
+      WidgetsBinding.instance.scheduleFrame();
+      return;
+    }
     final boxes = render.getBoxesForSelection(
       TextSelection(baseOffset: range.start, extentOffset: range.end),
     );
@@ -356,7 +412,7 @@ class _ReadAloudTextState extends State<_ReadAloudText> {
             }
             return false;
           },
-          child: SingleChildScrollView(
+          child: ListView.builder(
             controller: _scroll,
             padding: const EdgeInsets.fromLTRB(
               Spacing.lg,
@@ -364,13 +420,9 @@ class _ReadAloudTextState extends State<_ReadAloudText> {
               Spacing.lg,
               Spacing.xxl,
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                for (var i = 0; i < _paragraphs.length; i++)
-                  _paragraph(i, textScaler, base, current, word, failed),
-              ],
-            ),
+            itemCount: _paragraphs.length,
+            itemBuilder: (context, i) =>
+                _paragraph(i, textScaler, base, current, word, failed),
           ),
         ),
         if (!_follow)
@@ -439,19 +491,17 @@ class _ReadAloudTextState extends State<_ReadAloudText> {
     final signature = _signature(i, textScaler);
     final cached = _built[i];
     if (cached != null && _builtSignature[i] == signature) return cached;
-    final built = RepaintBoundary(
-      child: Padding(
-        padding: const EdgeInsets.only(bottom: Spacing.md),
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTapUp: (details) => _onTap(i, details),
-          child: RichText(
-            key: _keys[i],
-            textScaler: textScaler,
-            text: TextSpan(
-              style: base,
-              children: _spans(i, base, current, word, failed),
-            ),
+    final built = Padding(
+      padding: const EdgeInsets.only(bottom: Spacing.md),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTapUp: (details) => _onTap(i, details),
+        child: RichText(
+          key: _keys[i],
+          textScaler: textScaler,
+          text: TextSpan(
+            style: base,
+            children: _spans(i, base, current, word, failed),
           ),
         ),
       ),
