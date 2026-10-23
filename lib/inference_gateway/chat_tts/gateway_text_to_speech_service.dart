@@ -8,6 +8,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:conduit_core/models/backend_config.dart';
 import 'package:conduit_core/features/chat/server_speech/server_speech_providers.dart';
 import 'package:conduit_core/providers/app_providers.dart';
+import 'package:conduit_core/services/settings_service.dart' show TtsEngine;
 import 'package:conduit_core/utils/debug_logger.dart';
 
 import '../../features/chat/services/text_to_speech_service.dart';
@@ -36,6 +37,8 @@ class GatewayTextToSpeechService extends TextToSpeechService {
   ReadAloudOverlayHost? _overlay;
 
   final ValueNotifier<ReadAloudSnapshot?> readAloud = ValueNotifier(null);
+  final ValueNotifier<String?> readAloudError = ValueNotifier(null);
+  Timer? _errorTimer;
 
   VoidCallback? _onStart;
   VoidCallback? _onComplete;
@@ -87,6 +90,7 @@ class GatewayTextToSpeechService extends TextToSpeechService {
     };
     engine.onError = (message) {
       _lastPart = -1;
+      _showReadAloudError(message);
       _onError?.call(message);
       _releaseWakelockIfIdle();
     };
@@ -101,6 +105,18 @@ class GatewayTextToSpeechService extends TextToSpeechService {
       if (identical(_engine, engine)) readAloud.value = engine.snapshot.value;
     });
     return _engine = engine;
+  }
+
+  void _showReadAloudError(String message) {
+    _errorTimer?.cancel();
+    readAloudError.value = message;
+    _errorTimer = Timer(const Duration(seconds: 10), dismissReadAloudError);
+  }
+
+  void dismissReadAloudError() {
+    _errorTimer?.cancel();
+    _errorTimer = null;
+    readAloudError.value = null;
   }
 
   void _handleReadAloudStatus(ReadAloudStatus status) {
@@ -152,6 +168,26 @@ class GatewayTextToSpeechService extends TextToSpeechService {
   }
 
   @override
+  Future<bool> initialize({
+    String? deviceVoice,
+    String? serverVoice,
+    double speechRate = 0.5,
+    double pitch = 1.0,
+    double volume = 1.0,
+    TtsEngine engine = TtsEngine.device,
+  }) async {
+    if (_gatewayActive) return true;
+    return super.initialize(
+      deviceVoice: deviceVoice,
+      serverVoice: serverVoice,
+      speechRate: speechRate,
+      pitch: pitch,
+      volume: volume,
+      engine: engine,
+    );
+  }
+
+  @override
   Future<void> speak(String text) async {
     if (!_gatewayActive) {
       await _speaker?.stop();
@@ -171,6 +207,7 @@ class GatewayTextToSpeechService extends TextToSpeechService {
     final config = _ref.read(gatewayConfigProvider);
     _lastPart = -1;
     _pauseNotified = false;
+    dismissReadAloudError();
     _overlay ??= ReadAloudOverlayHost(service: this);
     unawaited(WakelockPlus.enable());
     final engine = await _ensureEngine();
@@ -242,6 +279,7 @@ class GatewayTextToSpeechService extends TextToSpeechService {
 
   @override
   Future<void> stop() async {
+    dismissReadAloudError();
     if (_speaker != null || _engine != null) {
       await _engine?.stop();
       await _speaker?.stop();
@@ -318,7 +356,9 @@ class GatewayTextToSpeechService extends TextToSpeechService {
     final engine = _engine;
     _engine = null;
     await engine?.dispose();
+    _errorTimer?.cancel();
     readAloud.dispose();
+    readAloudError.dispose();
     await super.dispose();
   }
 }

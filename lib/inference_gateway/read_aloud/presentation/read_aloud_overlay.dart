@@ -11,6 +11,7 @@ import 'read_aloud_panel.dart';
 class ReadAloudOverlayHost {
   ReadAloudOverlayHost({required this.service}) {
     service.readAloud.addListener(_sync);
+    service.readAloudError.addListener(_sync);
   }
 
   final GatewayTextToSpeechService service;
@@ -18,7 +19,8 @@ class ReadAloudOverlayHost {
   OverlayEntry? _entry;
 
   void _sync() {
-    final active = service.readAloud.value != null;
+    final active =
+        service.readAloud.value != null || service.readAloudError.value != null;
     if (active && _entry == null) {
       final overlay = NavigationService.navigatorKey.currentState?.overlay;
       if (overlay == null) return;
@@ -35,6 +37,7 @@ class ReadAloudOverlayHost {
 
   void dispose() {
     service.readAloud.removeListener(_sync);
+    service.readAloudError.removeListener(_sync);
     _entry?.remove();
     _entry = null;
     _expanded.dispose();
@@ -71,7 +74,17 @@ class ReadAloudOverlay extends StatelessWidget {
           child: ValueListenableBuilder<ReadAloudSnapshot?>(
             valueListenable: service.readAloud,
             builder: (context, snapshot, _) {
-              if (snapshot == null) return const SizedBox.shrink();
+              if (snapshot == null) {
+                return ValueListenableBuilder<String?>(
+                  valueListenable: service.readAloudError,
+                  builder: (context, error, _) => error == null
+                      ? const SizedBox.shrink()
+                      : _ErrorBar(
+                          message: error,
+                          onClose: service.dismissReadAloudError,
+                        ),
+                );
+              }
               return _MiniBar(
                 snapshot: snapshot,
                 service: service,
@@ -125,11 +138,14 @@ class _MiniBar extends StatelessWidget {
                   ReadAloudPlayButton(snapshot: snapshot, service: service),
                   Expanded(
                     child: Text(
-                      sentence,
+                      snapshot.retrying ? 'Retrying…' : sentence,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodyMedium
-                          ?.copyWith(color: theme.textPrimary),
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: snapshot.retrying
+                            ? theme.textSecondary
+                            : theme.textPrimary,
+                      ),
                     ),
                   ),
                   IconButton(
@@ -150,6 +166,47 @@ class _MiniBar extends StatelessWidget {
               minHeight: 2,
               color: theme.buttonPrimary,
               backgroundColor: theme.dividerColor,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ErrorBar extends StatelessWidget {
+  const _ErrorBar({required this.message, required this.onClose});
+
+  final String message;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = context.conduitTheme;
+    return Material(
+      color: theme.cardBackground,
+      elevation: 6,
+      borderRadius: BorderRadius.circular(AppBorderRadius.lg),
+      clipBehavior: Clip.antiAlias,
+      child: Padding(
+        padding: const EdgeInsets.only(left: Spacing.md, right: Spacing.xs),
+        child: Row(
+          children: [
+            Icon(Icons.error_outline, color: theme.error, size: IconSize.lg),
+            const SizedBox(width: Spacing.sm),
+            Expanded(
+              child: Text(
+                'Read aloud failed. $message',
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodyMedium
+                    ?.copyWith(color: theme.textPrimary),
+              ),
+            ),
+            IconButton(
+              tooltip: 'Dismiss',
+              icon: Icon(Icons.close, color: theme.iconSecondary),
+              onPressed: onClose,
             ),
           ],
         ),

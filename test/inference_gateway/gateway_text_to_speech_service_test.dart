@@ -91,4 +91,30 @@ void main() {
     await idleCallContainer.read(_testTtsProvider).stopStreamingTts();
     check(fakeWakelock.toggles).deepEquals(<bool>[false]);
   });
+
+  test(
+    'initializes without the device engine when gateway TTS is on',
+    () async {
+      final container = ProviderContainer(
+        overrides: [
+          gatewayConfigProvider.overrideWith(
+            () => _FixedGatewayConfigNotifier(
+              GatewayConfig.defaults().copyWith(
+                baseUrl: 'https://gateway.test',
+                apiKey: 'secret-key',
+                ttsEnabled: true,
+              ),
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final available = await container
+          .read(_testTtsProvider)
+          .initialize()
+          .timeout(const Duration(seconds: 2));
+      check(available).isTrue();
+    },
+  );
 }

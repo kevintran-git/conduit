@@ -46,7 +46,11 @@ class ReadAloudPanel extends StatelessWidget {
                       ),
                       Expanded(
                         child: Text(
-                          snapshot.buffering ? 'Buffering…' : 'Read aloud',
+                          snapshot.retrying
+                              ? 'Retrying…'
+                              : snapshot.buffering
+                              ? 'Buffering…'
+                              : 'Read aloud',
                           textAlign: TextAlign.center,
                           style: Theme.of(context).textTheme.titleMedium
                               ?.copyWith(color: theme.textPrimary),

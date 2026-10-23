@@ -69,12 +69,8 @@ import '../widgets/audio_player_dialog.dart';
 import '../widgets/audio_recording_overlay.dart';
 import '../widgets/note_file_attachment.dart';
 import '../widgets/note_floating_actions.dart';
+import '../../../inference_gateway/read_aloud/note_read_aloud.dart';
 
-/// Builds the rich-note editor theme from Conduit's semantic color tokens.
-///
-/// Fleather's fallback block styles derive their colors from a separate
-/// [DefaultTextStyle]. Every block type must therefore be mapped explicitly so
-/// headings and lists remain readable in both brightness modes.
 FleatherThemeData buildNoteEditorFleatherTheme(BuildContext context) {
   final theme = context.conduitTheme;
   final fallback = FleatherThemeData.fallback(context);
@@ -168,7 +164,6 @@ FleatherThemeData buildNoteEditorFleatherTheme(BuildContext context) {
   );
 }
 
-/// Page for editing a note with OpenWebUI-style layout.
 class NoteEditorPage extends ConsumerStatefulWidget {
   final String noteId;
 
@@ -195,69 +190,39 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
   bool _isRecording = false;
   Note? _note;
 
-  // The session the page opened under. A retained provider can rebuild for
-  // another account while this page is alive, so loads, saves and destructive
-  // actions are judged against these rather than against whatever is current
-  // when they run.
   late final Object? _openApi;
   late final AppDatabase? _openDb;
   late final Object _openAuthEpoch;
   late final String? _openUserId;
 
-  /// A save was refused because edit access is gone. The typed text stays in
-  /// the editor, which turns read-only, until the user saves it as their own
-  /// note or discards it.
   bool _writeRefused = false;
 
-  /// The server refused to show the note (403), which is not a missing note.
   bool _loadForbidden = false;
 
-  /// The owner of a note shared read-only with this account, looked up by id
-  /// when the note itself does not name them. [_ownerLookupFor] is the owner
-  /// id asked about, so each owner is looked up once.
   String? _ownerLookupFor;
   String? _resolvedOwnerName;
 
-  /// The account changed after the page opened, so nothing it loads or saves
-  /// belongs to the page any more.
   bool _sessionChanged = false;
 
   late final ProviderContainer _container;
   late final NoteAttachmentsController _attachments;
   late final DeletedNoteDraftRecovery _recovery;
 
-  // Voice input
   VoiceInputService? _voiceService;
   StreamSubscription<String>? _voiceSub;
-  // The in-progress dictation run: each (cumulative) transcript update
-  // replaces the previous one without disturbing the rest of the document.
   NoteDictationRun? _dictationRun;
-  // The listening run this editor started. The voice service is shared with
-  // the chat composer and holds one run at a time, so the editor stops it only
-  // while its own run is still the current one. Compared with `==`: reading a
-  // controller's `stream` twice gives two wrappers that are equal (same
-  // controller) but not identical, and each run has its own controller.
   Stream<String>? _dictationStream;
 
-  // Markdown snapshot of the last saved/loaded document, used to detect real
-  // edits. Compared against the re-encoded current document so opening a note
-  // never registers as a spurious change from non-semantic markdown
-  // normalisation.
   String _savedMarkdown = '';
 
   static final _whitespacePattern = RegExp(r'\s+');
   int _cachedWordCount = 0;
 
-  // Cached Fleather theme. Derived from the app theme via the inherited
-  // context, so it is (re)computed in didChangeDependencies rather than on
-  // every build — the editor and toolbar both consume it each frame.
   FleatherThemeData? _fleatherTheme;
 
-  /// Plain text of the current document (empty when no note is loaded).
   String get _contentPlainText =>
       _contentController?.document.toPlainText().trimRight() ?? '';
 
-  /// Markdown encoding of the current document.
   String get _contentMarkdown {
     final controller = _contentController;
     return controller == null ? '' : markdownFromDocument(controller.document);
@@ -324,12 +289,7 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
     )..start();
     _loadNote();
     _titleController.addListener(_onContentChanged);
-    // The content controller is created once the note is loaded; its listener
-    // is wired up in [_installContentDocument].
-    // Rebuild when title focus changes to show/hide the generate title button
     _titleFocusNode.addListener(_onTitleFocusChanged);
-    // Rebuild to show/hide the formatting toolbar as the editor gains/loses
-    // focus.
     _contentFocusNode.addListener(_onContentFocusChanged);
   }
 
@@ -339,9 +299,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
 
   void _onContentFocusChanged() {
     if (!mounted) return;
-    // When the editor loses focus (e.g. the user taps away or starts
-    // navigating elsewhere), flush any pending edit immediately instead of
-    // waiting out the debounce, so a quick format-then-leave isn't dropped.
     if (!_contentFocusNode.hasFocus && _hasChanges) {
       _saveDebounce?.cancel();
       unawaited(_autoSave());
@@ -355,13 +312,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
     _fleatherTheme = _buildFleatherTheme(context);
   }
 
-  /// Replaces the content editor's controller with one backed by [document],
-  /// disposing the previous controller. Used on initial load and whenever the
-  /// whole document is swapped (e.g. AI enhancement).
-  ///
-  /// Does not touch [_savedMarkdown]: callers that load already-persisted
-  /// content reset the baseline themselves, while callers that introduce new
-  /// content (enhancement) leave it so the change is detected and auto-saved.
   void _installContentDocument(ParchmentDocument document) {
     final previous = _contentController;
     final controller = FleatherController(document: document);
@@ -379,9 +329,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
     _voiceSub?.cancel();
     _recovery.dispose();
     _attachments.dispose();
-    // The service is the app-wide provider instance shared with the chat
-    // composer: never dispose it here, and only stop it when this editor's
-    // own dictation run is still the active listener.
     if (_isRecording && _ownsDictationRun) _voiceService?.stopListening();
     _titleController.dispose();
     _contentChangesSubscription?.cancel();
@@ -405,17 +352,12 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
     authEpoch: authEpoch,
   );
 
-  /// Whether the page is still in the session it opened under. Unlike
-  /// [_isCurrentNoteSession] it takes nothing from the moment of the call, so
-  /// an account switched in between cannot pass for the one that opened it.
   bool get _isOpenSessionCurrent => _isCurrentNoteSession(
     api: _openApi,
     db: _openDb,
     authEpoch: _openAuthEpoch,
   );
 
-  /// Editing is off unless the note is known to be writable by the account
-  /// that opened it, or a save was refused.
   bool get _readOnly =>
       _writeRefused ||
       _note == null ||
@@ -461,8 +403,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
       final note = await _readNoteById(widget.noteId);
 
       if (mounted) {
-        // The provider may have rebuilt for another account while loading; its
-        // note is not this page's to show.
         if (!_isOpenSessionCurrent) {
           setState(() {
             _isLoading = false;
@@ -487,7 +427,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
       }
     } catch (e) {
       if (mounted) {
-        // A refusal is not a deleted note: say so, and show nothing else.
         if (e is DioException && e.response?.statusCode == 403) {
           setState(() {
             _isLoading = false;
@@ -503,9 +442,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
 
   Future<Note?> _readNoteById(String noteId) {
     final provider = noteByIdProvider(noteId);
-    // An invalidated provider keeps its previous value or error while it
-    // recomputes (e.g. right after this note was saved), so only a state that
-    // is no longer loading is the result for this opening.
     final current = ref.read(provider);
     if (!current.isLoading) {
       if (current.hasValue) {
@@ -544,10 +480,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
   void _onContentChanged() {
     if (!mounted || _isLoading || _note == null || _readOnly) return;
 
-    // Optimistically flag the note dirty so the unsaved indicator reacts
-    // immediately. The authoritative comparison — which re-encodes the document
-    // to markdown — is deferred to the debounced auto-save so we never run a
-    // full delta->markdown traversal on every keystroke.
     if (!_hasChanges) {
       setState(() => _hasChanges = true);
     }
@@ -563,16 +495,10 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
     );
   }
 
-  /// Handles a back-navigation attempt. Reached only when [canPop] was false,
-  /// i.e. there is a pending edit: flush it while still mounted (so the durable
-  /// write doesn't race teardown), then pop programmatically.
   Future<void> _onEditorPopInvoked(bool didPop, Object? result) async {
     if (didPop) return;
     _saveDebounce?.cancel();
     await _autoSave();
-    // Keep the editor open if persistence failed. In particular, a remotely
-    // deleted note needs its recovery retry to remain mounted rather than
-    // silently discarding the draft during navigation.
     if (mounted) {
       if (_hasChanges) {
         _recovery.pendingRetry?.call();
@@ -586,9 +512,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
     final note = _note;
     if (note == null) return;
 
-    // Authoritative dirty check: compare the re-encoded markdown against the
-    // snapshot taken on load/save so markdown normalisation on open never
-    // registers as an edit, and a no-op edit never hits the server.
     final titleChanged = _titleController.text != note.title;
     final contentChanged = _contentMarkdown != _savedMarkdown;
     if (!titleChanged && !contentChanged) {
@@ -600,13 +523,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
     await _saveNote(showFeedback: false);
   }
 
-  /// Builds the note `data` PATCH for an update: `content` when
-  /// [includeContent] is true, plus `files` when [files] is provided. It
-  /// deliberately does NOT spread the (possibly stale) in-memory `_note.data`:
-  /// `durableUpdateNote` merges this patch onto the CURRENT DB row, which
-  /// preserves server-managed fields like `versions` (a pull may have added
-  /// entries while the editor was open — spreading the editor's stale copy here
-  /// would revert them on the next save).
   Map<String, dynamic> _composeUpdatedNoteData({
     List<Map<String, dynamic>>? files,
     bool includeContent = true,
@@ -621,15 +537,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
     return data;
   }
 
-  /// Persists a note title/data edit through the durable outbox path (when a
-  /// Drift database is active) so an offline edit is never lost, falling back to
-  /// the API-first path in reviewer mode / with no active server. Returns the
-  /// stored note, or `null` if it could not be persisted.
-  ///
-  /// [api]/[db] are the session captured by the caller BEFORE its awaits; if the
-  /// active account/database changed in the meantime (e.g. during an audio
-  /// upload), this bails without persisting so the old editor's note is never
-  /// written into a newly active account.
   Future<Note?> _persistNoteUpdate({
     required Object? api,
     required AppDatabase? db,
@@ -648,7 +555,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
       title: title,
       data: data,
       authEpoch: authEpoch,
-      // The account that opened the page, not whoever is active at Save.
       accountId: _openUserId,
       authSnapshot: authSnapshot,
       cancelToken: cancelToken,
@@ -659,8 +565,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
   Future<void> _saveNote({bool showFeedback = true}) async {
     if (_note == null || _readOnly) return;
 
-    // An account switched since the page opened must not receive this edit,
-    // and the text stays where it is rather than being retried under it.
     if (!_isOpenSessionCurrent) {
       _saveDebounce?.cancel();
       setState(() => _sessionChanged = true);
@@ -680,8 +584,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
     try {
       final title = _titleController.text.trim();
 
-      // Preserve existing note data (versions, attached files) — only the
-      // content changes here.
       final savedMarkdown = _contentMarkdown;
       final data = _composeUpdatedNoteData();
 
@@ -721,8 +623,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
         }
       }
     } on NoteWriteDeniedException {
-      // Access went away since the note loaded. Keep the draft on screen,
-      // stop autosaving it, and leave the choice to the user.
       _saveDebounce?.cancel();
       if (mounted) {
         setState(() {
@@ -762,8 +662,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
       isDestructive: true,
     );
 
-    // The dialog outlives the tap; an account switched while it was open must
-    // not delete the note under another identity.
     if (confirmed && mounted && _isOpenSessionCurrent) {
       ConduitHaptics.mediumImpact();
       final success = await ref
@@ -775,9 +673,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
     }
   }
 
-  /// Opens the note's access sheet. The editor's own opening session must
-  /// still be the active one; the sheet then captures the same session again
-  /// for the share operation itself.
   Future<void> _shareNote() async {
     final note = _note;
     if (note == null || _readOnly) return;
@@ -787,8 +682,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
     }
     final saved = await shareNote(context, ref, note);
     if (saved == null || !mounted || !_isOpenSessionCurrent) return;
-    // The server's answer carries the account's write access, which a save can
-    // change; the editor follows it.
     setState(() {
       _note = _note?.copyWith(
         writeAccess: saved.writeAccess ?? _note?.writeAccess,
@@ -814,7 +707,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
     ConduitHaptics.selectionClick();
   }
 
-  // AI title generation
   Future<void> _generateTitle() async {
     if (_note == null || _isGeneratingTitle || _readOnly) return;
     final l10n = AppLocalizations.of(context)!;
@@ -845,7 +737,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
     }
   }
 
-  // AI content enhancement
   Future<void> _enhanceContent() async {
     if (_note == null || _isEnhancing || _readOnly) return;
     final l10n = AppLocalizations.of(context)!;
@@ -860,10 +751,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
           setState(() {
             _installContentDocument(documentFromMarkdown(result.text!));
           });
-          // _installContentDocument deliberately leaves _savedMarkdown
-          // untouched, so the enhanced content now differs from the saved
-          // baseline; re-run change detection to flag the enhancement for
-          // auto-save.
           _onContentChanged();
           ConduitHaptics.mediumImpact();
           AdaptiveSnackBar.show(
@@ -889,7 +776,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
     }
   }
 
-  // Voice dictation
   Future<void> _toggleDictation() async {
     if (_isRecording) {
       await _stopDictation();
@@ -900,8 +786,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
 
   Future<void> _startDictation() async {
     if (_readOnly) return;
-    // Use the shared service, as the chat composer does, so dictation honours
-    // the user's speech-to-text preference (e.g. server-only) and locale.
     _voiceService ??= ref.read(voiceInputServiceProvider);
 
     try {
@@ -914,9 +798,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
 
       final stream = await _voiceService!.beginListening();
       if (!mounted) {
-        // The editor closed while listening was starting. Capture is already
-        // running and dispose() saw no dictation to stop, so stop it here,
-        // unless another consumer has taken the service over since.
         if (_voiceService?.textStream == stream) {
           unawaited(_voiceService?.stopListening());
         }
@@ -924,9 +805,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
       }
       _dictationStream = stream;
 
-      // Anchor the dictation run at the current selection. The trailing
-      // line-break of a Parchment document is not editable, so clamp before
-      // it.
       final controller = _contentController;
       if (controller == null) {
         _dictationRun = null;
@@ -976,7 +854,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
     }
   }
 
-  /// Whether the voice service is still on the run this editor started.
   bool get _ownsDictationRun =>
       _dictationStream != null && _voiceService?.textStream == _dictationStream;
 
@@ -991,9 +868,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
     }
   }
 
-  /// Applies the latest (cumulative) dictation [transcript] by replacing the
-  /// previously inserted run with the new text, leaving the rest of the
-  /// document -- and its formatting -- untouched.
   void _applyDictationText(String transcript) {
     final controller = _contentController;
     final run = _dictationRun;
@@ -1008,7 +882,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
     );
   }
 
-  /// Shows a bottom sheet to choose between dictation and audio recording.
   void _showRecordingOptions() async {
     final conduitTheme = context.conduitTheme;
     final l10n = AppLocalizations.of(context)!;
@@ -1062,7 +935,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
       builder: (context) => Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Dictation option
           AdaptiveListTile(
             leading: SizedBox(
               width: IconSize.xl,
@@ -1094,7 +966,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
             },
           ),
           const SizedBox(height: Spacing.xs),
-          // Audio recording option
           AdaptiveListTile(
             leading: SizedBox(
               width: IconSize.xl,
@@ -1128,7 +999,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
     );
   }
 
-  /// Shows the full-screen audio recording overlay.
   void _showAudioRecordingOverlay() {
     Navigator.of(context).push(
       PageRouteBuilder<void>(
@@ -1168,31 +1038,19 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
 
   @override
   Widget build(BuildContext context) {
-    // The Share action depends on this; watching rebuilds the menu when the
-    // account's permissions arrive or change.
     ref.watch(workspaceCapabilitiesProvider);
-    // The read-only banner names the note's owner once the account's lookup
-    // exists; watching retries the lookup when it arrives.
     ref.watch(workspacePrincipalLookupProvider);
-    // Check if notes feature is enabled - redirect to chat if disabled
     final notesEnabled = ref.watch(notesFeatureEnabledProvider);
     if (!notesEnabled) {
-      // Redirect back to chat on next frame
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           context.go('/chat');
         }
       });
-      // Show empty scaffold while redirecting
       return const AdaptiveRouteShell(body: SizedBox.shrink());
     }
 
     return PopScope(
-      // Allow the back gesture/animation to proceed normally when there is
-      // nothing to save. When an edit is still pending (within the auto-save
-      // debounce), intercept the pop, flush the save while the widget is still
-      // mounted (so the durable write completes without racing teardown), then
-      // pop programmatically.
       canPop: !_hasChanges,
       onPopInvokedWithResult: _onEditorPopInvoked,
       child: AdaptiveRouteShell(
@@ -1243,12 +1101,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
                   onGenerateTitle: _generateTitle,
                 ),
               ),
-            // Formatting toolbar — shown above the keyboard while the content
-            // editor is focused (in place of the floating actions row). The
-            // scaffold uses resizeToAvoidBottomInset, so the body is already
-            // laid out above the keyboard; anchoring at bottom: 0 sits the
-            // toolbar directly on top of it (anchoring at viewInsets.bottom
-            // would double-count the inset and push it up to the stats row).
             if (!_isLoading &&
                 _note != null &&
                 !_readOnly &&
@@ -1281,13 +1133,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
           ),
           child: FleatherTheme(
             data: _fleatherTheme ??= _buildFleatherTheme(context),
-            // Markdown is the canonical stored format, so hide every control
-            // whose result markdown can't represent — otherwise the user
-            // applies formatting that silently vanishes on save/reopen.
-            // Dropped: underline, text/background colour, alignment,
-            // indentation, and text direction. Kept: bold, italic,
-            // strikethrough, inline code, headings, lists (incl. checkboxes),
-            // code blocks, quotes, links, and horizontal rules.
             child: FleatherToolbar.basic(
               controller: controller,
               hideUnderLineButton: true,
@@ -1366,6 +1211,7 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
           materialIcon: Icons.copy_outlined,
         ),
       ),
+      ...gatewayNoteMenuItems(ref, noteId: _note?.id),
       if (_note != null && !_readOnly && canShareNote(ref, _note!))
         AdaptivePopupMenuItem<String>(
           value: 'share',
@@ -1383,7 +1229,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
           materialIcon: Icons.push_pin_outlined,
         ),
       ),
-      // The delete endpoint takes the same people as an edit.
       if (!_readOnly)
         AdaptivePopupMenuItem<String>(
           value: 'delete',
@@ -1432,6 +1277,12 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
         _deleteNote();
         return;
     }
+    handleGatewayNoteMenuSelection(
+      ref,
+      value,
+      noteId: _note?.id,
+      markdown: () => _contentMarkdown,
+    );
   }
 
   Widget _buildNoteEditorTitlePill(
@@ -1713,16 +1564,13 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
       return _buildNotFoundState(context);
     }
 
-    // Title is now edited in the app bar pill, so just show the content editor
     return _buildEditor(context);
   }
 
   Widget _buildEditor(BuildContext context) {
     final topPadding = MediaQuery.of(context).padding.top;
-    // Adaptive app bar height + metadata bar (~40).
     final appBarHeight = conduitAdaptiveToolbarHeightOf(context) + 40;
 
-    // Get attached files
     final files = _note?.data.files ?? [];
 
     return GestureDetector(
@@ -1733,16 +1581,14 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
         edgeOffset: topPadding + appBarHeight + Spacing.sm,
         child: SingleChildScrollView(
           controller: _scrollController,
-          // Always scrollable so pull-to-refresh works even when the note is
-          // short enough to fit on screen.
           physics: const AlwaysScrollableScrollPhysics(),
           padding: EdgeInsets.fromLTRB(
             Spacing.inputPadding,
             topPadding +
                 appBarHeight +
-                Spacing.sm, // Space for floating app bar
+                Spacing.sm,
             Spacing.inputPadding,
-            120, // Extra padding for floating buttons
+            120,
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1750,12 +1596,10 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
               if (_accessNotice(AppLocalizations.of(context)!)
                   case final notice?)
                 _buildAccessNotice(context, notice),
-              // File attachments section (including durable pending audio).
               if (files.isNotEmpty || _attachments.pending.isNotEmpty) ...[
                 _buildAttachmentsSection(context, files),
                 const SizedBox(height: Spacing.lg),
               ],
-              // Content editor
               _buildContentEditor(context),
             ],
           ),
@@ -1958,13 +1802,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
     }
   }
 
-  /// Pull-to-refresh handler: syncs the note with the server, then reloads it
-  /// into the editor.
-  ///
-  /// Order matters. We first flush any pending local edit, then run a full sync
-  /// cycle (push the outbox + pull the server) before re-reading. Re-reading
-  /// without syncing would let the detail fetch return a server copy that is
-  /// behind a not-yet-synced local edit and clobber it with stale/empty content.
   Future<void> _refreshNote() async {
     final noteBeforeRefresh = _note;
     final hadDraftChanges =
@@ -1977,8 +1814,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
     }
     if (!mounted) return;
 
-    // Push local changes and pull remote ones so the local row reflects both
-    // sides. Mirrors the notes-list pull-to-refresh.
     final api = _openApi;
     final db = _openDb;
     final authEpoch = _openAuthEpoch;
@@ -1989,20 +1824,13 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
       await syncEngine.requestPull(reason: 'note-editor-refresh');
       await syncEngine.reconcileNow();
     } catch (_) {
-      // Best-effort; still reload from the (at least locally-current) row below.
     }
     if (!mounted ||
         !_isCurrentNoteSession(api: api, db: db, authEpoch: authEpoch)) {
       return;
     }
 
-    // Re-read from the reconciled LOCAL row, not a fresh server fetch: the pull
-    // has already merged remote edits into it, and reading the row avoids a
-    // server copy that's behind a not-yet-pushed local edit clobbering it.
     try {
-      // The note is already open in the current session, so an id-scoped read is
-      // safe here (avoids pulling auth providers into the editor just for the
-      // user id).
       final currentNoteId = _note?.id ?? widget.noteId;
       final resolvedNoteId = await db.notesDao.resolveNoteRemapTarget(
         currentNoteId,
@@ -2013,9 +1841,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
         return;
       }
       if (note == null) {
-        // The user may have typed while the pull/reconcile/read was in flight.
-        // Recover those edits as a new local note because the reconciler has
-        // already removed the old row and an update could no longer persist.
         if (hadDraftChanges || _hasChanges) {
           if (!_hasChanges) setState(() => _hasChanges = true);
           await _recovery.recover(
@@ -2042,14 +1867,7 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
         });
         return;
       }
-      // If the user typed while the sync/read was in flight, do NOT overwrite
-      // their in-progress edits: those keystroke(s) re-set `_hasChanges` and
-      // queued a fresh debounce. Bail out and leave the editor as-is so that
-      // debounce saves them — overwriting here would discard them silently.
-      // (No await between this check and the setState below, so nothing can
-      // sneak in.)
       if (_hasChanges) return;
-      // Keep the detail cache consistent with what we just loaded.
       ref.invalidate(noteByIdProvider(currentNoteId));
       if (resolvedNoteId != currentNoteId) {
         ref.invalidate(noteByIdProvider(resolvedNoteId));
@@ -2079,10 +1897,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
         controller: controller,
         focusNode: _contentFocusNode,
         readOnly: _readOnly,
-        // Lives inside the page's SingleChildScrollView; the editor must not
-        // scroll independently so the whole note grows with the content. Give
-        // Fleather the parent controller so context-menu actions can reveal the
-        // selection without reading an unattached internal ScrollController.
         scrollController: _scrollController,
         scrollable: false,
         expands: false,
@@ -2092,8 +1906,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
       ),
     );
 
-    // Fleather has no built-in placeholder, so overlay a hint while the
-    // document is empty.
     final showPlaceholder = _contentPlainText.isEmpty;
     return FleatherTheme(
       data: _fleatherTheme ??= _buildFleatherTheme(context),
@@ -2120,13 +1932,10 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
     );
   }
 
-  /// Builds a Fleather theme derived from the app's typography and colours so
-  /// the rich-text editor matches the rest of the note UI.
   FleatherThemeData _buildFleatherTheme(BuildContext context) {
     return buildNoteEditorFleatherTheme(context);
   }
 
-  /// Play an audio file attachment.
   Future<void> _playAudioFile(Map<String, dynamic> file) async {
     final localPath = file['_localPath']?.toString();
     if (localPath != null && localPath.isNotEmpty) {
@@ -2160,7 +1969,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
     );
   }
 
-  /// Remove a file attachment from the note.
   Future<void> _removeFile(Map<String, dynamic> file) async {
     final l10n = AppLocalizations.of(context)!;
 
@@ -2222,7 +2030,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
     }
   }
 
-  /// Why the note cannot be edited, or null when it can.
   String? _accessNotice(AppLocalizations l10n) {
     final note = _note;
     if (note == null) return null;
@@ -2237,9 +2044,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
     };
   }
 
-  /// The name of whoever shared [note] with this account, when known. A note
-  /// that does not carry its owner's name has it looked up once, through the
-  /// lookup of the account the page opened under.
   String? _sharedOwnerName(Note note) {
     final named = noteSharedOwner(note, accountId: _openUserId)?.name?.trim();
     if (named != null && named.isNotEmpty) return named;
@@ -2248,15 +2052,12 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
       return null;
     }
     if (_ownerLookupFor == ownerId) return _resolvedOwnerName;
-    // Until the account's lookup exists (a cold start or a deep link), try
-    // again on a later build rather than marking the owner as looked up.
     final lookup = ref.read(workspacePrincipalLookupProvider);
     if (lookup == null || !_isOpenSessionCurrent) return null;
     _ownerLookupFor = ownerId;
     _resolvedOwnerName = null;
     unawaited(() async {
       await lookup.resolve([(type: WorkspacePrincipalType.user, id: ownerId)]);
-      // A name read for another account is never shown here.
       if (!mounted ||
           _ownerLookupFor != ownerId ||
           !identical(ref.read(workspacePrincipalLookupProvider), lookup) ||
@@ -2274,8 +2075,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
     return null;
   }
 
-  /// Saves what is on screen as a new note the user owns, through the same
-  /// recovery used when a note is deleted under an open editor.
   Future<void> _saveDraftAsOwnNote() async {
     final session = NoteRecoverySession(
       api: _openApi,
@@ -2284,7 +2083,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
       userId: _openUserId,
     );
     await _recovery.recover(session);
-    // The recovery rebinds the editor to the new note, which the user owns.
     if (mounted && !_hasChanges) setState(() => _writeRefused = false);
   }
 
@@ -2365,8 +2163,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
     );
   }
 
-  /// Notes open with `go`, so the editor is often the only page in its
-  /// navigator; popping it would leave nothing on screen.
   void _leaveMissingNote() {
     final navigator = Navigator.of(context);
     if (navigator.canPop()) {
