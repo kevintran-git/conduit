@@ -15,6 +15,7 @@ import 'playback_clock.dart';
 import 'read_aloud_plan.dart';
 import 'read_aloud_store.dart';
 import 'segment_audio.dart';
+import 'time_stretch.dart';
 
 enum ReadAloudStatus { loading, playing, paused }
 
@@ -31,6 +32,8 @@ class ReadAloudSnapshot {
     required this.duration,
     required this.durationExact,
     required this.failed,
+    this.device = false,
+    this.speed = 1,
   });
 
   final ReadAloudPlan plan;
@@ -44,6 +47,8 @@ class ReadAloudSnapshot {
   final Duration duration;
   final bool durationExact;
   final Set<int> failed;
+  final bool device;
+  final double speed;
 
   bool get isPaused => status == ReadAloudStatus.paused;
 }
@@ -106,6 +111,7 @@ class ReadAloudEngine {
   void Function()? onCompleted;
   void Function(String message, bool heard)? onError;
   void Function(String voice)? onVoiceRejected;
+  void Function()? onResumedFromMark;
   void Function(int part, int start, int end)? onWord;
 
   final ValueNotifier<ReadAloudSnapshot?> snapshot = ValueNotifier(null);
@@ -138,6 +144,7 @@ class ReadAloudEngine {
   Completer<void>? _gate;
   double _msPerWeight = _defaultMsPerWeight;
   double _gain = 1;
+  double _speed = 1;
   int _lastWordSeg = -1;
   int _lastWord = -1;
   String? _lastFailure;
@@ -154,6 +161,21 @@ class ReadAloudEngine {
 
   bool get isActive => _active;
   bool get isPaused => _active && _paused;
+  double get speed => _speed;
+
+  Future<void> setSpeed(double value) async {
+    final next = value.clamp(0.5, 3.0).toDouble();
+    if ((next - _speed).abs() < 0.001) return;
+    _speed = next;
+    unawaited(_store.saveSpeed(next));
+    if (!_active) return;
+    if (_running) {
+      final pos = _currentPosition();
+      await _jumpTo(pos.segment, pos.offset);
+      return;
+    }
+    _publish();
+  }
 
   Future<void> play({
     required String text,
@@ -162,6 +184,7 @@ class ReadAloudEngine {
     required String model,
     Map<String, String> pronunciations = const {},
     bool resumeStored = true,
+    int? startSegment,
   }) async {
     if (_disposed) return;
     await stop();
@@ -206,7 +229,13 @@ class ReadAloudEngine {
     _playStartedAt = DateTime.now();
     _lastWordSeg = -1;
     _lastWord = -1;
-    _seg = _nextAudible(0, 1) ?? 0;
+    _seg =
+        _nextAudible(
+          (startSegment ?? 0).clamp(0, plan.segments.length - 1),
+          1,
+        ) ??
+        _nextAudible(0, 1) ??
+        0;
     _offset = 0;
     _armDeadline();
     _publish();
@@ -214,12 +243,17 @@ class ReadAloudEngine {
     final loads = await Future.wait<Object?>([
       _store.loadRate(_voiceKey),
       _store.loadGain(_voiceKey),
-      if (resumeStored) _store.loadMark(_messageKey!) else Future.value(),
+      _store.loadSpeed(),
+      if (resumeStored && startSegment == null)
+        _store.loadMark(_messageKey!)
+      else
+        Future.value(),
     ]);
     if (session != _session) return;
     _msPerWeight = loads[0] as double? ?? _defaultMsPerWeight;
     _gain = loads[1] as double? ?? 1;
-    final mark = loads[2] as ReadAloudMark?;
+    _speed = loads[2] as double? ?? _speed;
+    final mark = loads[3] as ReadAloudMark?;
     await _probeCache(session, _seg);
     if (session != _session) return;
     if (mark == null && !_cachedBytes.containsKey(_seg)) _startJob(_seg);
@@ -228,7 +262,12 @@ class ReadAloudEngine {
         if (!plan.segments[i].silent && i != _seg) _probeCache(session, i),
     ]);
     if (session != _session) return;
-    if (mark != null) _applyMark(mark);
+    if (mark != null) {
+      _applyMark(mark);
+      if (_seg != (_nextAudible(0, 1) ?? 0) || _offset > 0) {
+        onResumedFromMark?.call();
+      }
+    }
     readAloudTrace('play', {
       'segments': plan.segments.length,
       'cached': _cachedBytes.length,
@@ -543,6 +582,12 @@ class ReadAloudEngine {
     final clock = _clock;
     final halted = _halt.future;
     if (plan == null || clock == null) return;
+    final stretcher = TimeStretcher(
+      speed: _speed,
+      sampleRate: kTtsSampleRateHz,
+    );
+    var lastSeg = startSeg;
+    var lastAccounted = startOffset;
     var failStreak = 0;
     Future<void> segmentFailed(int i) async {
       failStreak++;
@@ -570,13 +615,18 @@ class ReadAloudEngine {
       }
       var offset = i == startSeg ? startOffset : 0;
       offset -= offset % 2;
+      var accounted = offset;
+      lastSeg = i;
       while (true) {
         if (runId != _runId) return;
         if (offset < audio.length) {
           final end = math.min(audio.length, offset + _chunkBytes);
-          final bytes = audio.bytesFrom(offset, end);
-          clock.fed(i, offset, bytes.length);
+          final bytes = stretcher.process(audio.bytesFrom(offset, end));
           offset = end;
+          if (bytes.isEmpty) continue;
+          clock.fed(i, accounted, bytes.length, sourceLength: end - accounted);
+          accounted = end;
+          lastAccounted = end;
           yield bytes;
           await _pace(runId, clock);
           continue;
@@ -597,6 +647,11 @@ class ReadAloudEngine {
         failStreak = 0;
       }
     }
+    if (runId != _runId) return;
+    final tail = stretcher.flush();
+    if (tail.isEmpty) return;
+    clock.fed(lastSeg, lastAccounted, tail.length, sourceLength: 0);
+    yield tail;
   }
 
   Future<void> _pace(int runId, PlaybackClock clock) async {
@@ -863,6 +918,7 @@ class ReadAloudEngine {
       duration: Duration(milliseconds: _totalMs()),
       durationExact: exact,
       failed: Set.unmodifiable(_failed),
+      speed: _speed,
     );
     if (pos.segment != _lastWordSeg || word != _lastWord) {
       _lastWordSeg = pos.segment;

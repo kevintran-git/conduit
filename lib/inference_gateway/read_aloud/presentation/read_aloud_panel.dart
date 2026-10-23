@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 
 import '../../../shared/theme/theme_extensions.dart';
 import '../../chat_tts/gateway_text_to_speech_service.dart';
@@ -10,7 +11,18 @@ import '../read_aloud_engine.dart';
 import '../read_aloud_plan.dart';
 import 'read_aloud_overlay.dart';
 
-class ReadAloudPanel extends StatelessWidget {
+const List<double> readAloudSpeeds = [0.75, 1, 1.25, 1.5, 1.75, 2];
+
+String formatReadAloudSpeed(double speed) {
+  final text = speed == speed.roundToDouble()
+      ? speed.toStringAsFixed(0)
+      : speed.toStringAsFixed(2).replaceFirst(RegExp(r'0$'), '');
+  return '$text×';
+}
+
+enum _Sheet { none, speed, voices }
+
+class ReadAloudPanel extends StatefulWidget {
   const ReadAloudPanel({
     super.key,
     required this.service,
@@ -21,14 +33,30 @@ class ReadAloudPanel extends StatelessWidget {
   final VoidCallback onCollapse;
 
   @override
+  State<ReadAloudPanel> createState() => _ReadAloudPanelState();
+}
+
+class _ReadAloudPanelState extends State<ReadAloudPanel> {
+  _Sheet _sheet = _Sheet.none;
+  ReadAloudSnapshot? _last;
+
+  GatewayTextToSpeechService get service => widget.service;
+
+  void _toggle(_Sheet sheet) =>
+      setState(() => _sheet = _sheet == sheet ? _Sheet.none : sheet);
+
+  @override
   Widget build(BuildContext context) {
     final theme = context.conduitTheme;
+    final onCollapse = widget.onCollapse;
     return Material(
       color: theme.surfaceBackground,
       child: SafeArea(
         child: ValueListenableBuilder<ReadAloudSnapshot?>(
           valueListenable: service.readAloud,
-          builder: (context, snapshot, _) {
+          builder: (context, live, _) {
+            final snapshot = live ?? _last;
+            _last = snapshot;
             if (snapshot == null) return const SizedBox.shrink();
             return Column(
               children: [
@@ -66,11 +94,67 @@ class ReadAloudPanel extends StatelessWidget {
                     ],
                   ),
                 ),
+                if (snapshot.device)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: Spacing.lg),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.phone_android,
+                          size: IconSize.md,
+                          color: theme.iconSecondary,
+                        ),
+                        const SizedBox(width: Spacing.xs),
+                        Expanded(
+                          child: Text(
+                            'Device voice',
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(color: theme.textSecondary),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () =>
+                              unawaited(service.retryGatewayVoice()),
+                          child: const Text('Retry gateway'),
+                        ),
+                      ],
+                    ),
+                  ),
                 Expanded(
-                  child: _ReadAloudText(snapshot: snapshot, service: service),
+                  child: AnimatedSwitcher(
+                    duration: AnimationDuration.fast,
+                    child: _sheet == _Sheet.voices && !snapshot.device
+                        ? _VoiceList(
+                            key: const ValueKey('voices'),
+                            service: service,
+                            onDone: () => setState(() => _sheet = _Sheet.none),
+                          )
+                        : _ReadAloudText(snapshot: snapshot, service: service),
+                  ),
                 ),
                 _Scrubber(snapshot: snapshot, service: service),
                 _Controls(snapshot: snapshot, service: service),
+                if (!snapshot.device) ...[
+                  AnimatedSize(
+                    duration: AnimationDuration.fast,
+                    child: _sheet == _Sheet.speed
+                        ? _SpeedChoices(
+                            speed: snapshot.speed,
+                            onPick: (speed) {
+                              setState(() => _sheet = _Sheet.none);
+                              unawaited(service.setReadAloudSpeed(speed));
+                            },
+                          )
+                        : const SizedBox(width: double.infinity),
+                  ),
+                  _Options(
+                    snapshot: snapshot,
+                    voice: service.readAloudVoice,
+                    sheet: _sheet,
+                    onSpeed: () => _toggle(_Sheet.speed),
+                    onVoice: () => _toggle(_Sheet.voices),
+                  ),
+                ],
                 const SizedBox(height: Spacing.sm),
               ],
             );
@@ -397,12 +481,14 @@ class _ScrubberState extends State<_Scrubber> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  _format(Duration(milliseconds: value.round())),
+                  _format(
+                    Duration(milliseconds: (value / snapshot.speed).round()),
+                  ),
                   style: caption,
                 ),
                 Text(
                   '${snapshot.durationExact ? '' : '~'}'
-                  '${_format(snapshot.duration)}',
+                  '${_format(snapshot.duration * (1 / snapshot.speed))}',
                   style: caption,
                 ),
               ],
@@ -435,7 +521,10 @@ class _Controls extends StatelessWidget {
         IconButton(
           tooltip: 'Previous sentence',
           icon: Icon(Icons.skip_previous_rounded, color: theme.iconPrimary),
-          onPressed: () => unawaited(service.skipSegments(-1)),
+          onPressed: () {
+            unawaited(HapticFeedback.selectionClick());
+            unawaited(service.skipSegments(-1));
+          },
         ),
         ReadAloudPlayButton(
           snapshot: snapshot,
@@ -445,7 +534,10 @@ class _Controls extends StatelessWidget {
         IconButton(
           tooltip: 'Next sentence',
           icon: Icon(Icons.skip_next_rounded, color: theme.iconPrimary),
-          onPressed: () => unawaited(service.skipSegments(1)),
+          onPressed: () {
+            unawaited(HapticFeedback.selectionClick());
+            unawaited(service.skipSegments(1));
+          },
         ),
         IconButton(
           tooltip: 'Forward 10 seconds',
@@ -454,6 +546,194 @@ class _Controls extends StatelessWidget {
               unawaited(service.skipBy(const Duration(seconds: 10))),
         ),
       ],
+    );
+  }
+}
+
+class _Options extends StatelessWidget {
+  const _Options({
+    required this.snapshot,
+    required this.voice,
+    required this.sheet,
+    required this.onSpeed,
+    required this.onVoice,
+  });
+
+  final ReadAloudSnapshot snapshot;
+  final String voice;
+  final _Sheet sheet;
+  final VoidCallback onSpeed;
+  final VoidCallback onVoice;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        _OptionChip(
+          icon: Icons.speed,
+          label: formatReadAloudSpeed(snapshot.speed),
+          selected: sheet == _Sheet.speed,
+          tooltip: 'Playback speed',
+          onTap: onSpeed,
+        ),
+        const SizedBox(width: Spacing.sm),
+        _OptionChip(
+          icon: Icons.record_voice_over_outlined,
+          label: voice.isEmpty ? 'Default voice' : voice,
+          selected: sheet == _Sheet.voices,
+          tooltip: 'Voice',
+          onTap: onVoice,
+        ),
+      ],
+    );
+  }
+}
+
+class _OptionChip extends StatelessWidget {
+  const _OptionChip({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = context.conduitTheme;
+    final color = selected ? theme.buttonPrimary : theme.textSecondary;
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: selected
+            ? theme.buttonPrimary.withValues(alpha: 0.12)
+            : theme.cardBackground,
+        shape: StadiumBorder(side: BorderSide(color: theme.dividerColor)),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: Spacing.md,
+              vertical: Spacing.xs,
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: IconSize.sm, color: color),
+                const SizedBox(width: Spacing.xs),
+                Text(
+                  label,
+                  style: Theme.of(context).textTheme.labelLarge
+                      ?.copyWith(color: color),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SpeedChoices extends StatelessWidget {
+  const _SpeedChoices({required this.speed, required this.onPick});
+
+  final double speed;
+  final ValueChanged<double> onPick;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = context.conduitTheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: Spacing.sm),
+      child: Wrap(
+        alignment: WrapAlignment.center,
+        spacing: Spacing.xs,
+        children: [
+          for (final option in readAloudSpeeds)
+            ChoiceChip(
+              label: Text(formatReadAloudSpeed(option)),
+              selected: (option - speed).abs() < 0.01,
+              selectedColor: theme.buttonPrimary.withValues(alpha: 0.2),
+              onSelected: (_) => onPick(option),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _VoiceList extends StatefulWidget {
+  const _VoiceList({super.key, required this.service, required this.onDone});
+
+  final GatewayTextToSpeechService service;
+  final VoidCallback onDone;
+
+  @override
+  State<_VoiceList> createState() => _VoiceListState();
+}
+
+class _VoiceListState extends State<_VoiceList> {
+  late final Future<List<String>> _voices = widget.service.readAloudVoices();
+
+  void _pick(String voice) {
+    widget.onDone();
+    if (voice == widget.service.readAloudVoice) return;
+    unawaited(widget.service.switchReadAloudVoice(voice));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = context.conduitTheme;
+    final current = widget.service.readAloudVoice;
+    return FutureBuilder<List<String>>(
+      future: _voices,
+      builder: (context, result) {
+        if (result.connectionState != ConnectionState.done) {
+          return Center(
+            child: CircularProgressIndicator(color: theme.loadingIndicator),
+          );
+        }
+        final voices = result.data ?? const <String>[];
+        final entries = ['', ...voices.where((v) => v != '')];
+        return ListView.builder(
+          padding: const EdgeInsets.symmetric(vertical: Spacing.sm),
+          itemCount: entries.length + (result.hasError ? 1 : 0),
+          itemBuilder: (context, index) {
+            if (index == entries.length) {
+              return ListTile(
+                title: Text(
+                  'Could not load the gateway voice list.',
+                  style: TextStyle(color: theme.textSecondary),
+                ),
+              );
+            }
+            final voice = entries[index];
+            final selected = voice == current;
+            return ListTile(
+              title: Text(
+                voice.isEmpty ? 'Default voice' : voice,
+                style: TextStyle(
+                  color: theme.textPrimary,
+                  fontWeight: selected ? FontWeight.w600 : null,
+                ),
+              ),
+              trailing: selected
+                  ? Icon(Icons.check, color: theme.buttonPrimary)
+                  : null,
+              onTap: () => _pick(voice),
+            );
+          },
+        );
+      },
     );
   }
 }

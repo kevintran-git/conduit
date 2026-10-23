@@ -443,18 +443,66 @@ void main() {
     await _disposeQuietly(engine);
   }, timeout: const Timeout(Duration(seconds: 30)));
 
+  test('plays faster at a stored higher speed', () async {
+    SharedPreferences.setMockInitialValues({'gateway_read_aloud_speed': 2.0});
+    final client = _FakeClient();
+    final sink = _FakeSink();
+    final engine = _makeEngine(client, sink, dir);
+    final probe = _Probe(engine);
+    await playText(engine, three);
+    expect(engine.speed, 2.0);
+    await probe.completed.future.timeout(const Duration(seconds: 20));
+    expect(sink.fedBytes, inInclusiveRange(12000, 16500));
+    await _disposeQuietly(engine);
+  }, timeout: const Timeout(Duration(seconds: 30)));
+
+  test('changing speed mid-play keeps the position and persists', () async {
+    final store = ReadAloudStore();
+    final client = _FakeClient(bytesPerSegment: 48000);
+    final engine = _makeEngine(client, _FakeSink(), dir, store: store);
+    final probe = _Probe(engine);
+    await playText(engine, three);
+    await engine.skipSegments(1);
+    await engine.setSpeed(1.5);
+    expect(engine.snapshot.value!.segment, 1);
+    expect(engine.snapshot.value!.speed, 1.5);
+    expect(await store.loadSpeed(), 1.5);
+    await probe.completed.future.timeout(const Duration(seconds: 20));
+    await _disposeQuietly(engine);
+  }, timeout: const Timeout(Duration(seconds: 30)));
+
+  test('starts at a requested segment and ignores the saved mark', () async {
+    final client = _FakeClient(bytesPerSegment: 48000);
+    final engine = _makeEngine(client, _FakeSink(), dir);
+    _Probe(engine);
+    await engine.play(
+      text: three,
+      parts: [three],
+      voice: 'v',
+      model: 'm',
+      startSegment: 2,
+    );
+    expect(engine.snapshot.value!.segment, 2);
+    await engine.stop();
+    await _disposeQuietly(engine);
+  }, timeout: const Timeout(Duration(seconds: 30)));
+
   test('resumes from the saved mark', () async {
     final store = ReadAloudStore();
     final client = _FakeClient(bytesPerSegment: 48000);
     final engine = _makeEngine(client, _FakeSink(), dir, store: store);
     _Probe(engine);
+    var resumed = 0;
+    engine.onResumedFromMark = () => resumed++;
     await playText(engine, three);
+    expect(resumed, 0);
     await Future<void>.delayed(const Duration(milliseconds: 200));
     await engine.skipSegments(1);
     await Future<void>.delayed(const Duration(milliseconds: 400));
     await engine.stop();
     await playText(engine, three);
     expect(engine.snapshot.value!.segment, equals(1));
+    expect(resumed, 1);
     await engine.stop();
     await _disposeQuietly(engine);
   }, timeout: const Timeout(Duration(seconds: 30)));
