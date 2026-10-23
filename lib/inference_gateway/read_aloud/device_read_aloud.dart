@@ -2,8 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
-import 'read_aloud_engine.dart';
-import 'read_aloud_plan.dart';
+import 'package:inference_kit/read_aloud.dart';
 
 class DeviceReadAloud {
   DeviceReadAloud({

@@ -1,7 +1,6 @@
 import 'package:conduit/inference_gateway/chat_tts/gateway_text_to_speech_service.dart';
 import 'package:conduit/inference_gateway/read_aloud/presentation/read_aloud_panel.dart';
-import 'package:conduit/inference_gateway/read_aloud/read_aloud_engine.dart';
-import 'package:conduit/inference_gateway/read_aloud/read_aloud_plan.dart';
+import 'package:inference_kit/read_aloud.dart';
 import 'package:conduit/shared/theme/app_theme.dart';
 import 'package:conduit/shared/theme/tweakcn_themes.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
