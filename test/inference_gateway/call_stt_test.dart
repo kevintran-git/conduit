@@ -27,43 +27,40 @@ class _FakeNativeSttService extends NativeSttService {
 }
 
 void main() {
-  test(
-    'folds accumulated transcript into committed text before manual-EOS restart',
-    () async {
-      final nativeStt = _FakeNativeSttService();
-      final stt = DeviceCallStt(
-        pauseFor: const Duration(seconds: 2),
-        manualEosOnly: true,
-        stt: nativeStt,
-      );
-      addTearDown(stt.dispose);
+  test('folds accumulated transcript into committed text before manual-EOS restart', () async {
+    final nativeStt = _FakeNativeSttService();
+    final stt = DeviceCallStt(
+      pauseFor: const Duration(seconds: 2),
+      manualEosOnly: true,
+      stt: nativeStt,
+    );
+    addTearDown(stt.dispose);
 
-      final events = <SttEvent>[];
-      final sub = stt.events.listen(events.add);
-      addTearDown(sub.cancel);
+    final events = <SttEvent>[];
+    final sub = stt.events.listen(events.add);
+    addTearDown(sub.cancel);
 
-      await stt.start();
-      check(nativeStt.controllers).length.equals(1);
+    await stt.start();
+    check(nativeStt.controllers).length.equals(1);
 
-      nativeStt.controllers[0].add(
-        const NativeSttEvent(type: 'result', text: 'first part'),
-      );
-      await Future<void>.delayed(Duration.zero);
+    nativeStt.controllers[0].add(
+      const NativeSttEvent(type: 'result', text: 'first part'),
+    );
+    await Future<void>.delayed(Duration.zero);
 
-      await nativeStt.controllers[0].close();
-      await Future<void>.delayed(const Duration(milliseconds: 120));
-      check(nativeStt.controllers).length.equals(2);
+    await nativeStt.controllers[0].close();
+    await Future<void>.delayed(const Duration(milliseconds: 120));
+    check(nativeStt.controllers).length.equals(2);
 
-      nativeStt.controllers[1].add(
-        const NativeSttEvent(type: 'result', text: 'second part'),
-      );
-      await Future<void>.delayed(Duration.zero);
+    nativeStt.controllers[1].add(
+      const NativeSttEvent(type: 'result', text: 'second part'),
+    );
+    await Future<void>.delayed(Duration.zero);
 
-      await stt.requestFinal();
-      await Future<void>.delayed(Duration.zero);
+    await stt.requestFinal();
+    await Future<void>.delayed(Duration.zero);
 
-      check(events.last.isFinal).isTrue();
-      check(events.last.text).equals('first part second part');
-    },
-  );
+    check(events.last.isFinal).isTrue();
+    check(events.last.text).equals('first part second part');
+  });
 }

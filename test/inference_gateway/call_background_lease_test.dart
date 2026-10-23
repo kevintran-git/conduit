@@ -49,13 +49,17 @@ void main() {
       await lease.acquire();
 
       check(handler.externalOwnerCalls).deepEquals(<bool>[false]);
-      check(handler.startedStreamIds).isNotNull().deepEquals(<String>['call-1']);
+      check(handler.startedStreamIds)
+          .isNotNull()
+          .deepEquals(<String>['call-1']);
       check(handler.startedRequiresMicrophone).equals(true);
       check(handler.startedKind).equals(BackgroundStreamKind.voice);
 
       await lease.release();
 
-      check(handler.stoppedStreamIds).isNotNull().deepEquals(<String>['call-1']);
+      check(handler.stoppedStreamIds)
+          .isNotNull()
+          .deepEquals(<String>['call-1']);
       check(handler.externalOwnerCalls).deepEquals(<bool>[false, false]);
     },
   );

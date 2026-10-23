@@ -87,10 +87,7 @@ void main() {
             theme: AppTheme.light(TweakcnThemes.t3Chat),
             home: const Scaffold(
               body: Column(
-                children: [
-                  GatewayTtsOptions(),
-                  GatewaySttModelField(),
-                ],
+                children: [GatewayTtsOptions(), GatewaySttModelField()],
               ),
             ),
           ),

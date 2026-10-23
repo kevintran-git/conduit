@@ -75,47 +75,41 @@ class _FakeSpeaker implements PcmStreamSpeaker {
 }
 
 void main() {
-  test(
-    'stop during WS handshake disposes newly opened session without starting playback',
-    () async {
-      final handshake = Completer<ik.ElevenLabsTtsSession>();
-      final session = _FakeTtsSession();
-      final speaker = _FakeSpeaker();
-      final tts = CallTts(
-        client: _FakeTtsClient(() => handshake.future),
-        config: GatewayConfig.defaults(),
-        speaker: speaker,
-      );
+  test('stop during WS handshake disposes newly opened session without starting playback', () async {
+    final handshake = Completer<ik.ElevenLabsTtsSession>();
+    final session = _FakeTtsSession();
+    final speaker = _FakeSpeaker();
+    final tts = CallTts(
+      client: _FakeTtsClient(() => handshake.future),
+      config: GatewayConfig.defaults(),
+      speaker: speaker,
+    );
 
-      final openFuture = tts.open();
-      tts.append('hello');
-      final stopFuture = tts.stop();
-      handshake.complete(session);
+    final openFuture = tts.open();
+    tts.append('hello');
+    final stopFuture = tts.stop();
+    handshake.complete(session);
 
-      await Future.wait(<Future<void>>[openFuture, stopFuture]);
+    await Future.wait(<Future<void>>[openFuture, stopFuture]);
 
-      check(session.disposed).isTrue();
-      check(speaker.streamCalls).equals(0);
-      check(session.appended).isEmpty();
-    },
-  );
+    check(session.disposed).isTrue();
+    check(speaker.streamCalls).equals(0);
+    check(session.appended).isEmpty();
+  });
 
-  test(
-    'dispose does not await hung speaker or session teardown',
-    () async {
-      final never = Completer<void>();
-      final session = _FakeTtsSession(disposeFuture: never.future);
-      final speaker = _FakeSpeaker()
-        ..stopFuture = never.future
-        ..disposeFuture = never.future;
-      final tts = CallTts(
-        client: _FakeTtsClient(() async => session),
-        config: GatewayConfig.defaults(),
-        speaker: speaker,
-      );
+  test('dispose does not await hung speaker or session teardown', () async {
+    final never = Completer<void>();
+    final session = _FakeTtsSession(disposeFuture: never.future);
+    final speaker = _FakeSpeaker()
+      ..stopFuture = never.future
+      ..disposeFuture = never.future;
+    final tts = CallTts(
+      client: _FakeTtsClient(() async => session),
+      config: GatewayConfig.defaults(),
+      speaker: speaker,
+    );
 
-      await tts.open();
-      await tts.dispose().timeout(const Duration(milliseconds: 100));
-    },
-  );
+    await tts.open();
+    await tts.dispose().timeout(const Duration(milliseconds: 100));
+  });
 }

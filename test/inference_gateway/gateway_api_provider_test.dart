@@ -28,39 +28,36 @@ class _TrackingAuthStateManager extends AuthStateManager {
 }
 
 void main() {
-  test(
-    'gatewayApiServiceProviderOverride builds GatewayApiService and wires auth callbacks',
-    () async {
-      final authNotifier = _TrackingAuthStateManager();
-      final workerManager = WorkerManager(maxConcurrentTasks: 1);
-      addTearDown(workerManager.dispose);
+  test('gatewayApiServiceProviderOverride builds GatewayApiService and wires auth callbacks', () async {
+    final authNotifier = _TrackingAuthStateManager();
+    final workerManager = WorkerManager(maxConcurrentTasks: 1);
+    addTearDown(workerManager.dispose);
 
-      const server = ServerConfig(
-        id: 'srv-1',
-        name: 'Test Server',
-        url: 'https://owui.test',
-      );
+    const server = ServerConfig(
+      id: 'srv-1',
+      name: 'Test Server',
+      url: 'https://owui.test',
+    );
 
-      final container = ProviderContainer(
-        overrides: [
-          apiServiceProvider.overrideWith(gatewayApiServiceProviderOverride),
-          reviewerModeProvider.overrideWithValue(false),
-          activeServerProvider.overrideWith((_) async => server),
-          workerManagerProvider.overrideWithValue(workerManager),
-          authStateManagerProvider.overrideWith(() => authNotifier),
-        ],
-      );
-      addTearDown(container.dispose);
+    final container = ProviderContainer(
+      overrides: [
+        apiServiceProvider.overrideWith(gatewayApiServiceProviderOverride),
+        reviewerModeProvider.overrideWithValue(false),
+        activeServerProvider.overrideWith((_) async => server),
+        workerManagerProvider.overrideWithValue(workerManager),
+        authStateManagerProvider.overrideWith(() => authNotifier),
+      ],
+    );
+    addTearDown(container.dispose);
 
-      await container.read(activeServerProvider.future);
-      final api = container.read(apiServiceProvider);
+    await container.read(activeServerProvider.future);
+    final api = container.read(apiServiceProvider);
 
-      check(api).isA<GatewayApiService>();
-      api!.onAuthTokenInvalid?.call();
-      await api.onTokenInvalidated?.call();
+    check(api).isA<GatewayApiService>();
+    api!.onAuthTokenInvalid?.call();
+    await api.onTokenInvalidated?.call();
 
-      check(authNotifier.authIssueCount).equals(1);
-      check(authNotifier.tokenInvalidatedCount).equals(1);
-    },
-  );
+    check(authNotifier.authIssueCount).equals(1);
+    check(authNotifier.tokenInvalidatedCount).equals(1);
+  });
 }

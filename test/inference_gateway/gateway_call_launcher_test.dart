@@ -1,4 +1,3 @@
-
 import 'package:checks/checks.dart';
 import 'package:conduit/inference_gateway/config/gateway_config.dart';
 import 'package:conduit/inference_gateway/config/gateway_providers.dart';
@@ -82,9 +81,8 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      check(
-        Overlay.maybeOf(NavigationService.navigatorKey.currentContext!),
-      ).isNull();
+      check(Overlay.maybeOf(NavigationService.navigatorKey.currentContext!))
+          .isNull();
       check(NavigationService.navigatorKey.currentState?.overlay).isNotNull();
 
       final launchFuture = container
