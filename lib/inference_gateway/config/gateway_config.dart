@@ -12,14 +12,15 @@ class GatewayConfig {
     this.ttsPronunciations = '',
   });
 
-  static const String defaultBaseUrl = 'https://api.kvtr.tech';
+  static const String defaultBaseUrl = String.fromEnvironment(
+    'GATEWAY_BASE_URL',
+  );
 
   static const String unsetModel = '';
 
-  static const String envBaseUrl = String.fromEnvironment('GATEWAY_BASE_URL');
   static const String envApiKey = String.fromEnvironment('GATEWAY_API_KEY');
   static bool get hasEnvCredentials =>
-      envBaseUrl.isNotEmpty && envApiKey.isNotEmpty;
+      defaultBaseUrl.isNotEmpty && envApiKey.isNotEmpty;
 
   factory GatewayConfig.defaults() => const GatewayConfig(
     baseUrl: defaultBaseUrl,

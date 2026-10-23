@@ -28,11 +28,7 @@ class GatewayStorage {
 
   GatewayConfig loadSync({required String apiKey}) {
     return GatewayConfig(
-      baseUrl:
-          _read<String>(_kBaseUrl) ??
-          (GatewayConfig.envBaseUrl.isNotEmpty
-              ? GatewayConfig.envBaseUrl
-              : GatewayConfig.defaultBaseUrl),
+      baseUrl: _read<String>(_kBaseUrl) ?? GatewayConfig.defaultBaseUrl,
       apiKey: apiKey,
       sttEnabled: _read<bool>(_kSttEnabled) ?? false,
       ttsEnabled: _read<bool>(_kTtsEnabled) ?? false,
