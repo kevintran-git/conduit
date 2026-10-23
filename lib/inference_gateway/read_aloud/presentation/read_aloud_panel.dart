@@ -170,6 +170,7 @@ class _Paragraph {
 
   final List<int> parts;
   final List<int> partStarts = [];
+  final List<int> segments = [];
   String text = '';
 }
 
@@ -189,6 +190,9 @@ class _ReadAloudTextState extends State<_ReadAloudText> {
   List<_Paragraph> _paragraphs = const [];
   List<GlobalKey> _keys = const [];
   final Map<int, int> _paragraphOfPart = {};
+  List<Widget?> _built = const [];
+  List<Object?> _builtSignature = const [];
+  TextStyle? _builtStyle;
   bool _follow = true;
   int _revealedSegment = -1;
 
@@ -220,22 +224,32 @@ class _ReadAloudTextState extends State<_ReadAloudText> {
   void _layout() {
     final plan = _plan = widget.snapshot.plan;
     final paragraphs = <_Paragraph>[];
+    final buffers = <StringBuffer>[];
     _paragraphOfPart.clear();
     for (var p = 0; p < plan.parts.length; p++) {
       if (paragraphs.isEmpty || plan.paragraphStarts.contains(p)) {
         paragraphs.add(_Paragraph([]));
+        buffers.add(StringBuffer());
       }
       final paragraph = paragraphs.last;
-      final buffer = StringBuffer(paragraph.text);
+      final buffer = buffers.last;
       if (buffer.isNotEmpty) buffer.write(' ');
       paragraph.partStarts.add(buffer.length);
       buffer.write(plan.parts[p]);
-      paragraph.text = buffer.toString();
       paragraph.parts.add(p);
       _paragraphOfPart[p] = paragraphs.length - 1;
     }
+    for (var i = 0; i < paragraphs.length; i++) {
+      paragraphs[i].text = buffers[i].toString();
+    }
+    for (final segment in plan.segments) {
+      final p = _paragraphOfPart[segment.partIndex];
+      if (p != null) paragraphs[p].segments.add(segment.index);
+    }
     _paragraphs = paragraphs;
     _keys = [for (final _ in paragraphs) GlobalKey()];
+    _built = List<Widget?>.filled(paragraphs.length, null);
+    _builtSignature = List<Object?>.filled(paragraphs.length, null);
   }
 
   ({int paragraph, int start, int end})? _segmentRange(int index) {
@@ -326,6 +340,12 @@ class _ReadAloudTextState extends State<_ReadAloudText> {
       decorationStyle: TextDecorationStyle.wavy,
       decorationColor: theme.error,
     );
+    final textScaler = MediaQuery.textScalerOf(context);
+    if (base != _builtStyle) {
+      _builtStyle = base;
+      _built = List<Widget?>.filled(_paragraphs.length, null);
+    }
+    _failedByParagraph = _groupFailed();
 
     return Stack(
       children: [
@@ -348,21 +368,7 @@ class _ReadAloudTextState extends State<_ReadAloudText> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 for (var i = 0; i < _paragraphs.length; i++)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: Spacing.md),
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTapUp: (details) => _onTap(i, details),
-                      child: RichText(
-                        key: _keys[i],
-                        textScaler: MediaQuery.textScalerOf(context),
-                        text: TextSpan(
-                          style: base,
-                          children: _spans(i, base, current, word, failed),
-                        ),
-                      ),
-                    ),
-                  ),
+                  _paragraph(i, textScaler, base, current, word, failed),
               ],
             ),
           ),
@@ -387,6 +393,74 @@ class _ReadAloudTextState extends State<_ReadAloudText> {
     );
   }
 
+  Map<int, List<int>> _failedByParagraph = const {};
+
+  Map<int, List<int>> _groupFailed() {
+    final plan = _plan;
+    final failed = widget.snapshot.failed;
+    if (plan == null || failed.isEmpty) return const {};
+    final grouped = <int, List<int>>{};
+    for (final index in failed) {
+      if (index < 0 || index >= plan.segments.length) continue;
+      final p = _paragraphOfPart[plan.segments[index].partIndex];
+      if (p != null) (grouped[p] ??= []).add(index);
+    }
+    for (final list in grouped.values) {
+      list.sort();
+    }
+    return grouped;
+  }
+
+  Object _signature(int paragraphIndex, TextScaler textScaler) {
+    final snapshot = widget.snapshot;
+    final plan = _plan!;
+    final segment = snapshot.segment;
+    final isCurrent =
+        segment >= 0 &&
+        segment < plan.segments.length &&
+        _paragraphOfPart[plan.segments[segment].partIndex] == paragraphIndex;
+    final failed = _failedByParagraph[paragraphIndex];
+    return (
+      isCurrent ? segment : -1,
+      isCurrent ? snapshot.word : -1,
+      failed?.join(','),
+      textScaler,
+    );
+  }
+
+  Widget _paragraph(
+    int i,
+    TextScaler textScaler,
+    TextStyle base,
+    TextStyle current,
+    TextStyle word,
+    TextStyle failed,
+  ) {
+    final signature = _signature(i, textScaler);
+    final cached = _built[i];
+    if (cached != null && _builtSignature[i] == signature) return cached;
+    final built = RepaintBoundary(
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: Spacing.md),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapUp: (details) => _onTap(i, details),
+          child: RichText(
+            key: _keys[i],
+            textScaler: textScaler,
+            text: TextSpan(
+              style: base,
+              children: _spans(i, base, current, word, failed),
+            ),
+          ),
+        ),
+      ),
+    );
+    _built[i] = built;
+    _builtSignature[i] = signature;
+    return built;
+  }
+
   List<InlineSpan> _spans(
     int paragraphIndex,
     TextStyle base,
@@ -407,12 +481,13 @@ class _ReadAloudTextState extends State<_ReadAloudText> {
       cursor = end;
     }
 
-    for (final segment in plan.segments) {
-      if (_paragraphOfPart[segment.partIndex] != paragraphIndex) continue;
+    final failedHere = _failedByParagraph[paragraphIndex] ?? const <int>[];
+    for (final segmentIndex in paragraph.segments) {
+      final segment = plan.segments[segmentIndex];
       final range = _segmentRange(segment.index)!;
       plain(range.start, base);
       final isCurrent = segment.index == snapshot.segment;
-      final isFailed = snapshot.failed.contains(segment.index);
+      final isFailed = failedHere.contains(segment.index);
       final style = isFailed ? failed : (isCurrent ? current : base);
       if (isCurrent &&
           snapshot.word >= 0 &&

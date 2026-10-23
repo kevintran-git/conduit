@@ -288,7 +288,26 @@ class ReadAloudEngine {
     _cachedBytes[i] = bytes;
   }
 
-  Future<void> pause() => _pause(fromInterruption: false);
+  Future<void> pause() async {
+    _stallRetry?.cancel();
+    if (_active && _paused && _stalled) {
+      _stalled = false;
+      onStatus?.call(ReadAloudStatus.paused);
+      _publish();
+      unawaited(_lease.release());
+      return;
+    }
+    await _pause(fromInterruption: false);
+  }
+
+  Timer? _stallRetry;
+
+  void _scheduleStallRetry() {
+    _stallRetry?.cancel();
+    _stallRetry = Timer(const Duration(seconds: 3), () {
+      if (_active && _paused && _stalled) unawaited(resume());
+    });
+  }
 
   Future<void> _pause({required bool fromInterruption}) async {
     if (!_active || _paused) return;
@@ -368,6 +387,7 @@ class ReadAloudEngine {
   }
 
   Future<void> stop() async {
+    _stallRetry?.cancel();
     if (!_active) return;
     if (_audible) await _saveMark();
     _cancelDeadline();
@@ -500,10 +520,9 @@ class ReadAloudEngine {
         'reason': _lastFailure ?? '',
       });
       _completeGate();
-      onStatus?.call(ReadAloudStatus.paused);
       _publish();
       await _saveMark();
-      unawaited(_lease.release());
+      _scheduleStallRetry();
       return;
     }
 
@@ -899,7 +918,7 @@ class ReadAloudEngine {
     final word = segment.wordIndexAt(offMs, segMs);
     final clock = _clock;
     final starved = clock == null || !clock.started || clock.starved;
-    final status = _paused
+    final status = _paused && !_stalled
         ? ReadAloudStatus.paused
         : (_running && (clock?.started ?? false))
         ? ReadAloudStatus.playing
@@ -967,17 +986,14 @@ class ReadAloudEngine {
       _audioSession = session;
       _interruptSub = session.interruptionEventStream.listen((event) {
         if (event.begin) {
-          if (event.type == AudioInterruptionType.duck) return;
+          if (event.type != AudioInterruptionType.pause) return;
           if (_running) {
             _resumeAfterInterruption = true;
             unawaited(_pause(fromInterruption: true));
           }
           return;
         }
-        final shouldResume =
-            event.type == AudioInterruptionType.pause &&
-            _resumeAfterInterruption &&
-            isPaused;
+        final shouldResume = _resumeAfterInterruption && isPaused;
         _resumeAfterInterruption = false;
         if (shouldResume) unawaited(resume());
       });
