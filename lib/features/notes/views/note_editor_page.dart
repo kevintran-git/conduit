@@ -82,6 +82,7 @@ import '../widgets/audio_recording_overlay.dart';
 import '../widgets/note_bottom_toolbar.dart';
 import '../widgets/note_file_attachment.dart';
 import '../widgets/note_floating_actions.dart';
+import '../../../inference_gateway/read_aloud/note_read_aloud.dart';
 
 /// Builds the rich-note editor theme from Conduit's semantic color tokens.
 ///
@@ -1977,6 +1978,7 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
           materialIcon: Icons.copy_outlined,
         ),
       ),
+      ...gatewayNoteMenuItems(ref, noteId: _note?.id),
       if (_note != null && !_readOnly && canShareNote(ref, _note!))
         AdaptivePopupMenuItem<String>(
           value: 'share',
@@ -2047,6 +2049,12 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
         _deleteNote();
         return;
     }
+    handleGatewayNoteMenuSelection(
+      ref,
+      value,
+      noteId: _note?.id,
+      markdown: () => _contentMarkdown,
+    );
   }
 
   Widget _buildNoteEditorTitlePill(

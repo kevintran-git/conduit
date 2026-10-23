@@ -222,169 +222,147 @@ void main() {
     if (await dir.exists()) await dir.delete(recursive: true);
   });
 
-  test(
-    'plays every sentence and completes',
-    () async {
-      final client = _FakeClient();
-      final sink = _FakeSink();
-      final engine = _makeEngine(client, sink, dir);
-      final probe = _Probe(engine);
-      await playText(engine, three);
-      await probe.completed.future.timeout(const Duration(seconds: 20));
-      expect(probe.startedCount, 1);
-      expect(client.opens, 3);
-      expect(client.texts.toSet(), {
-        'One two three.',
-        'Four five six.',
-        'Seven eight nine.',
-      });
-      expect(engine.isActive, isFalse);
-      expect(engine.snapshot.value, isNull);
-      expect(sink.fedBytes, 28800);
-      expect(probe.words, isNotEmpty);
-      expect(probe.words.first.$1, 0);
-      expect(probe.words.first.$2, 0);
-      expect(probe.errored.isCompleted, isFalse);
-      await _disposeQuietly(engine);
-    },
-    timeout: const Timeout(Duration(seconds: 30)),
-  );
+  test('plays every sentence and completes', () async {
+    final client = _FakeClient();
+    final sink = _FakeSink();
+    final engine = _makeEngine(client, sink, dir);
+    final probe = _Probe(engine);
+    await playText(engine, three);
+    await probe.completed.future.timeout(const Duration(seconds: 20));
+    expect(probe.startedCount, 1);
+    expect(client.opens, 3);
+    expect(client.texts.toSet(), {
+      'One two three.',
+      'Four five six.',
+      'Seven eight nine.',
+    });
+    expect(engine.isActive, isFalse);
+    expect(engine.snapshot.value, isNull);
+    expect(sink.fedBytes, 28800);
+    expect(probe.words, isNotEmpty);
+    expect(probe.words.first.$1, 0);
+    expect(probe.words.first.$2, 0);
+    expect(probe.errored.isCompleted, isFalse);
+    await _disposeQuietly(engine);
+  }, timeout: const Timeout(Duration(seconds: 30)));
 
-  test(
-    'reuses cached segments',
-    () async {
-      final client1 = _FakeClient();
-      final engine1 = _makeEngine(client1, _FakeSink(), dir);
-      final probe1 = _Probe(engine1);
-      await playText(engine1, three);
-      await probe1.completed.future.timeout(const Duration(seconds: 20));
-      await _disposeQuietly(engine1);
+  test('reuses cached segments', () async {
+    final client1 = _FakeClient();
+    final engine1 = _makeEngine(client1, _FakeSink(), dir);
+    final probe1 = _Probe(engine1);
+    await playText(engine1, three);
+    await probe1.completed.future.timeout(const Duration(seconds: 20));
+    await _disposeQuietly(engine1);
 
-      final client2 = _FakeClient();
-      final sink2 = _FakeSink();
-      final engine2 = _makeEngine(client2, sink2, dir);
-      final probe2 = _Probe(engine2);
-      await playText(engine2, three);
-      await probe2.completed.future.timeout(const Duration(seconds: 20));
-      expect(client2.opens, 0);
-      expect(sink2.fedBytes, 28800);
-      await _disposeQuietly(engine2);
-    },
-    timeout: const Timeout(Duration(seconds: 30)),
-  );
+    final client2 = _FakeClient();
+    final sink2 = _FakeSink();
+    final engine2 = _makeEngine(client2, sink2, dir);
+    final probe2 = _Probe(engine2);
+    await playText(engine2, three);
+    await probe2.completed.future.timeout(const Duration(seconds: 20));
+    expect(client2.opens, 0);
+    expect(sink2.fedBytes, 28800);
+    await _disposeQuietly(engine2);
+  }, timeout: const Timeout(Duration(seconds: 30)));
 
-  test(
-    'pauses and resumes',
-    () async {
-      final client = _FakeClient(bytesPerSegment: 48000);
-      final sink = _FakeSink();
-      final engine = _makeEngine(client, sink, dir);
-      final probe = _Probe(engine);
-      await playText(engine, three);
-      await Future<void>.delayed(const Duration(milliseconds: 300));
-      await engine.pause();
-      expect(engine.isPaused, isTrue);
-      expect(probe.statuses, contains(ReadAloudStatus.paused));
-      expect(
-        engine.snapshot.value!.status,
-        equals(ReadAloudStatus.paused),
-      );
-      await Future<void>.delayed(const Duration(milliseconds: 200));
-      await engine.resume();
-      expect(probe.statuses.last, equals(ReadAloudStatus.playing));
-      await probe.completed.future.timeout(const Duration(seconds: 20));
-      expect(sink.fedBytes, greaterThanOrEqualTo(144000));
-      await _disposeQuietly(engine);
-    },
-    timeout: const Timeout(Duration(seconds: 30)),
-  );
+  test('pauses and resumes', () async {
+    final client = _FakeClient(bytesPerSegment: 48000);
+    final sink = _FakeSink();
+    final engine = _makeEngine(client, sink, dir);
+    final probe = _Probe(engine);
+    await playText(engine, three);
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    await engine.pause();
+    expect(engine.isPaused, isTrue);
+    expect(probe.statuses, contains(ReadAloudStatus.paused));
+    expect(engine.snapshot.value!.status, equals(ReadAloudStatus.paused));
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    await engine.resume();
+    expect(probe.statuses.last, equals(ReadAloudStatus.playing));
+    await probe.completed.future.timeout(const Duration(seconds: 20));
+    expect(sink.fedBytes, greaterThanOrEqualTo(144000));
+    await _disposeQuietly(engine);
+  }, timeout: const Timeout(Duration(seconds: 30)));
 
-  test(
-    'reports an error when synthesis fails',
-    () async {
-      final client = _FakeClient(fail: true);
-      final engine = _makeEngine(client, _FakeSink(), dir);
-      final probe = _Probe(engine);
-      await playText(engine, three);
-      final message = await probe.errored.future.timeout(
-        const Duration(seconds: 25),
-      );
-      expect(message, isNotEmpty);
-      expect(probe.completed.isCompleted, isFalse);
-      expect(engine.isActive, isFalse);
-      expect(client.opens, greaterThanOrEqualTo(3));
-      await _disposeQuietly(engine);
-    },
-    timeout: const Timeout(Duration(seconds: 30)),
-  );
+  test('reports an error when synthesis fails', () async {
+    final client = _FakeClient(fail: true);
+    final engine = _makeEngine(client, _FakeSink(), dir);
+    final probe = _Probe(engine);
+    await playText(engine, three);
+    final message = await probe.errored.future.timeout(
+      const Duration(seconds: 25),
+    );
+    expect(message, 'Could not connect to the gateway.');
+    expect(probe.completed.isCompleted, isFalse);
+    expect(engine.isActive, isFalse);
+    expect(client.opens, greaterThanOrEqualTo(3));
+    await _disposeQuietly(engine);
+  }, timeout: const Timeout(Duration(seconds: 30)));
 
-  test(
-    'stop ends the session without completing',
-    () async {
-      final client = _FakeClient(bytesPerSegment: 48000);
-      final engine = _makeEngine(client, _FakeSink(), dir);
-      final probe = _Probe(engine);
-      await playText(engine, three);
-      await Future<void>.delayed(const Duration(milliseconds: 200));
-      await engine.stop();
-      expect(engine.isActive, isFalse);
-      expect(engine.snapshot.value, isNull);
-      await Future<void>.delayed(const Duration(milliseconds: 500));
-      expect(probe.completed.isCompleted, isFalse);
-      await _disposeQuietly(engine);
-    },
-    timeout: const Timeout(Duration(seconds: 30)),
-  );
+  test('names the voice when the gateway returns no audio', () async {
+    final client = _FakeClient(bytesPerSegment: 0);
+    final engine = _makeEngine(client, _FakeSink(), dir);
+    final probe = _Probe(engine);
+    await playText(engine, three);
+    final message = await probe.errored.future.timeout(
+      const Duration(seconds: 25),
+    );
+    expect(message, 'The gateway returned no audio for voice "v".');
+    expect(engine.isActive, isFalse);
+    await _disposeQuietly(engine);
+  }, timeout: const Timeout(Duration(seconds: 30)));
 
-  test(
-    'skips to the next sentence',
-    () async {
-      final client = _FakeClient(bytesPerSegment: 48000);
-      final engine = _makeEngine(client, _FakeSink(), dir);
-      final probe = _Probe(engine);
-      await playText(engine, three);
-      await Future<void>.delayed(const Duration(milliseconds: 200));
-      await engine.skipSegments(1);
-      expect(engine.snapshot.value!.segment, equals(1));
-      await probe.completed.future.timeout(const Duration(seconds: 20));
-      await _disposeQuietly(engine);
-    },
-    timeout: const Timeout(Duration(seconds: 30)),
-  );
+  test('stop ends the session without completing', () async {
+    final client = _FakeClient(bytesPerSegment: 48000);
+    final engine = _makeEngine(client, _FakeSink(), dir);
+    final probe = _Probe(engine);
+    await playText(engine, three);
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    await engine.stop();
+    expect(engine.isActive, isFalse);
+    expect(engine.snapshot.value, isNull);
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+    expect(probe.completed.isCompleted, isFalse);
+    await _disposeQuietly(engine);
+  }, timeout: const Timeout(Duration(seconds: 30)));
 
-  test(
-    'resumes from the saved mark',
-    () async {
-      final store = ReadAloudStore();
-      final client = _FakeClient(bytesPerSegment: 48000);
-      final engine = _makeEngine(client, _FakeSink(), dir, store: store);
-      _Probe(engine);
-      await playText(engine, three);
-      await Future<void>.delayed(const Duration(milliseconds: 200));
-      await engine.skipSegments(1);
-      await Future<void>.delayed(const Duration(milliseconds: 400));
-      await engine.stop();
-      await playText(engine, three);
-      expect(engine.snapshot.value!.segment, equals(1));
-      await engine.stop();
-      await _disposeQuietly(engine);
-    },
-    timeout: const Timeout(Duration(seconds: 30)),
-  );
+  test('skips to the next sentence', () async {
+    final client = _FakeClient(bytesPerSegment: 48000);
+    final engine = _makeEngine(client, _FakeSink(), dir);
+    final probe = _Probe(engine);
+    await playText(engine, three);
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    await engine.skipSegments(1);
+    expect(engine.snapshot.value!.segment, equals(1));
+    await probe.completed.future.timeout(const Duration(seconds: 20));
+    await _disposeQuietly(engine);
+  }, timeout: const Timeout(Duration(seconds: 30)));
 
-  test(
-    'seekTo moves the position',
-    () async {
-      final client = _FakeClient(bytesPerSegment: 48000);
-      final engine = _makeEngine(client, _FakeSink(), dir);
-      _Probe(engine);
-      await playText(engine, three);
-      await Future<void>.delayed(const Duration(milliseconds: 200));
-      await engine.seekTo(const Duration(milliseconds: 2100));
-      expect(engine.snapshot.value!.segment, equals(2));
-      await engine.stop();
-      await _disposeQuietly(engine);
-    },
-    timeout: const Timeout(Duration(seconds: 30)),
-  );
+  test('resumes from the saved mark', () async {
+    final store = ReadAloudStore();
+    final client = _FakeClient(bytesPerSegment: 48000);
+    final engine = _makeEngine(client, _FakeSink(), dir, store: store);
+    _Probe(engine);
+    await playText(engine, three);
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    await engine.skipSegments(1);
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    await engine.stop();
+    await playText(engine, three);
+    expect(engine.snapshot.value!.segment, equals(1));
+    await engine.stop();
+    await _disposeQuietly(engine);
+  }, timeout: const Timeout(Duration(seconds: 30)));
+
+  test('seekTo moves the position', () async {
+    final client = _FakeClient(bytesPerSegment: 48000);
+    final engine = _makeEngine(client, _FakeSink(), dir);
+    _Probe(engine);
+    await playText(engine, three);
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    await engine.seekTo(const Duration(milliseconds: 2100));
+    expect(engine.snapshot.value!.segment, equals(2));
+    await engine.stop();
+    await _disposeQuietly(engine);
+  }, timeout: const Timeout(Duration(seconds: 30)));
 }

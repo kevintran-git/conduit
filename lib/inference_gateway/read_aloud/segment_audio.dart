@@ -11,6 +11,7 @@ abstract class SegmentAudio {
   int get length;
   bool get done;
   bool get failed;
+  int get attempt;
   Uint8List bytesFrom(int start, int end);
   Future<void> waitForChange();
 }
@@ -26,6 +27,8 @@ class CachedSegmentAudio implements SegmentAudio {
   bool get done => true;
   @override
   bool get failed => false;
+  @override
+  int get attempt => 1;
 
   @override
   Uint8List bytesFrom(int start, int end) =>
@@ -43,7 +46,7 @@ class SegmentJob implements SegmentAudio {
     required this.text,
     required this.shaperFactory,
     this.maxAttempts = 3,
-    this.firstFrameTimeout = const Duration(seconds: 20),
+    this.firstFrameTimeout = const Duration(seconds: 12),
     this.idleTimeout = const Duration(seconds: 6),
   });
 
@@ -63,6 +66,8 @@ class SegmentJob implements SegmentAudio {
   bool _complete = false;
   bool _cancelled = false;
   double? _measuredGain;
+  int _attempt = 0;
+  String? _failureReason;
   ik.ElevenLabsTtsSession? _session;
   Completer<void> _change = Completer<void>();
   Future<void>? _run;
@@ -73,6 +78,9 @@ class SegmentJob implements SegmentAudio {
   bool get done => _done;
   @override
   bool get failed => _failed;
+  @override
+  int get attempt => _attempt;
+  String? get failureReason => _failureReason;
   bool get complete => _complete;
   double? get measuredGain => _measuredGain;
   Future<void> get finished => _run ?? Future<void>.value();
@@ -115,7 +123,9 @@ class SegmentJob implements SegmentAudio {
   Future<void> _runAttempts() async {
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
       if (_cancelled) break;
-      final outcome = await _attempt();
+      _attempt = attempt;
+      if (attempt > 1) _notify();
+      final outcome = await _runAttempt();
       if (outcome == _Outcome.complete) {
         _complete = true;
         break;
@@ -130,11 +140,15 @@ class SegmentJob implements SegmentAudio {
     _notify();
   }
 
-  Future<_Outcome> _attempt() async {
+  Future<_Outcome> _runAttempt() async {
     final shaper = shaperFactory();
     var received = 0;
+    var timedOut = false;
+    var dropped = false;
+    var connected = false;
     try {
       final session = await client.openSession(voice: voice, model: model);
+      connected = true;
       if (_cancelled) {
         await session.dispose();
         return _Outcome.failed;
@@ -145,6 +159,7 @@ class SegmentJob implements SegmentAudio {
       void arm(Duration timeout) {
         watchdog?.cancel();
         watchdog = Timer(timeout, () {
+          timedOut = true;
           if (!ended.isCompleted) ended.complete(false);
         });
       }
@@ -163,6 +178,7 @@ class SegmentJob implements SegmentAudio {
             error: error,
             stackTrace: stackTrace,
           );
+          dropped = true;
           if (!ended.isCompleted) ended.complete(false);
         },
         onDone: () {
@@ -178,7 +194,17 @@ class SegmentJob implements SegmentAudio {
       await session.dispose();
       _session = null;
       if (_cancelled) return _Outcome.failed;
-      if (received == 0) return _Outcome.failed;
+      if (received == 0) {
+        _failureReason = finishedCleanly
+            ? 'The gateway returned no audio for voice "$voice".'
+            : timedOut
+            ? 'The gateway sent no audio within '
+                  '${firstFrameTimeout.inSeconds} s.'
+            : dropped
+            ? 'The gateway connection dropped.'
+            : 'The gateway returned no audio.';
+        return _Outcome.failed;
+      }
       _append(shaper.finish());
       _measuredGain = shaper.measuredGain;
       if (!finishedCleanly) {
@@ -198,6 +224,11 @@ class SegmentJob implements SegmentAudio {
       );
       await _session?.dispose();
       _session = null;
+      if (received == 0) {
+        _failureReason = connected
+            ? 'The gateway connection failed.'
+            : 'Could not connect to the gateway.';
+      }
       return received > 0 ? _Outcome.truncated : _Outcome.failed;
     }
   }

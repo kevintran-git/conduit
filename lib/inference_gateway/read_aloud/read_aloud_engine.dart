@@ -23,6 +23,7 @@ class ReadAloudSnapshot {
     required this.plan,
     required this.status,
     required this.buffering,
+    required this.retrying,
     required this.segment,
     required this.word,
     required this.position,
@@ -34,6 +35,7 @@ class ReadAloudSnapshot {
   final ReadAloudPlan plan;
   final ReadAloudStatus status;
   final bool buffering;
+  final bool retrying;
   final int segment;
   final int word;
   final Duration position;
@@ -42,6 +44,15 @@ class ReadAloudSnapshot {
   final Set<int> failed;
 
   bool get isPaused => status == ReadAloudStatus.paused;
+}
+
+class ReadAloudFailure implements Exception {
+  const ReadAloudFailure(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
 }
 
 class ReadAloudEngine {
@@ -114,6 +125,7 @@ class ReadAloudEngine {
   double _gain = 1;
   int _lastWordSeg = -1;
   int _lastWord = -1;
+  String? _lastFailure;
 
   AudioSession? _audioSession;
   bool _audioSessionBound = false;
@@ -170,6 +182,7 @@ class ReadAloudEngine {
     _paused = false;
     _startedOnce = false;
     _audible = false;
+    _lastFailure = null;
     _lastWordSeg = -1;
     _lastWord = -1;
     _seg = _nextAudible(0, 1) ?? 0;
@@ -433,12 +446,25 @@ class ReadAloudEngine {
     final plan = _plan;
     final clock = _clock;
     if (plan == null || clock == null) return;
+    var failStreak = 0;
+    void segmentFailed() {
+      failStreak++;
+      if (!_audible && failStreak >= 2) {
+        throw ReadAloudFailure(
+          _lastFailure ?? 'The gateway returned no audio for this message.',
+        );
+      }
+    }
+
     for (var i = startSeg; i < plan.segments.length; i++) {
       if (runId != _runId) return;
       if (plan.segments[i].silent) continue;
       final audio = await _audioFor(i);
       if (runId != _runId) return;
-      if (audio == null) continue;
+      if (audio == null) {
+        segmentFailed();
+        continue;
+      }
       var offset = i == startSeg ? startOffset : 0;
       offset -= offset % 2;
       while (true) {
@@ -458,8 +484,14 @@ class ReadAloudEngine {
         _waiting = false;
       }
       if (audio.failed) {
+        if (audio is SegmentJob) {
+          _lastFailure = audio.failureReason ?? _lastFailure;
+        }
         _failed.add(i);
         _publish();
+        segmentFailed();
+      } else if (audio.length > 0) {
+        failStreak = 0;
       }
     }
   }
@@ -530,6 +562,7 @@ class ReadAloudEngine {
     final current = session == _session && identical(_jobs[i], job);
     if (job.failed) {
       if (current) {
+        _lastFailure = job.failureReason ?? _lastFailure;
         _failed.add(i);
         _publish();
         _pump();
@@ -707,10 +740,13 @@ class ReadAloudEngine {
         : (_running && (clock?.started ?? false))
         ? ReadAloudStatus.playing
         : ReadAloudStatus.loading;
+    final job = _jobs[pos.segment];
     snapshot.value = ReadAloudSnapshot(
       plan: plan,
       status: status,
       buffering: _running && _waiting && starved,
+      retrying:
+          _running && starved && job != null && !job.done && job.attempt > 1,
       segment: pos.segment,
       word: word,
       position: Duration(milliseconds: _globalMs(pos)),
