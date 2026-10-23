@@ -5,6 +5,10 @@ import 'package:conduit/inference_gateway/read_aloud/playback_clock.dart';
 import 'package:conduit/inference_gateway/read_aloud/read_aloud_plan.dart';
 import 'package:conduit/inference_gateway/read_aloud/read_aloud_store.dart';
 import 'package:conduit/inference_gateway/read_aloud/speech_text.dart';
+import 'package:conduit/inference_gateway/read_aloud/time_stretch.dart';
+
+import 'dart:math' as math;
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -61,10 +65,11 @@ void main() {
     });
 
     test('normalizeWords uses the previous word for numerals', () {
-      expect(
-        normalizeWords(['Chapter', 'IV', 'begins']),
-        ['Chapter', '4', 'begins'],
-      );
+      expect(normalizeWords(['Chapter', 'IV', 'begins']), [
+        'Chapter',
+        '4',
+        'begins',
+      ]);
     });
 
     test('parsePronunciations keeps single-word keys with values', () {
@@ -254,8 +259,22 @@ void main() {
   });
 
   group('playback_clock', () {
+    test('maps stretched output back to source offsets', () {
+      final clock = PlaybackClock(
+        bytesPerSecond: 1000,
+        now: () => Duration.zero,
+      );
+      clock.fed(0, 0, 500, sourceLength: 1000);
+      clock.fed(0, 1000, 500, sourceLength: 1000);
+      expect(clock.positionAt(250), (segment: 0, offset: 500));
+      expect(clock.positionAt(750), (segment: 0, offset: 1500));
+    });
+
     test('starts unstarted with no position', () {
-      final clock = PlaybackClock(bytesPerSecond: 1000, now: () => Duration.zero);
+      final clock = PlaybackClock(
+        bytesPerSecond: 1000,
+        now: () => Duration.zero,
+      );
       expect(clock.started, false);
       expect(clock.playedBytes, 0);
       expect(clock.position, isNull);
@@ -289,6 +308,51 @@ void main() {
       now = const Duration(milliseconds: 3050);
       expect(clock.playedBytes, 2050);
       expect(clock.position, (segment: 2, offset: 50));
+    });
+  });
+
+  group('time_stretch', () {
+    List<int> sine(int count, double hz) => [
+      for (var i = 0; i < count; i++)
+        (8000 * math.sin(2 * math.pi * hz * i / 24000)).round(),
+    ];
+
+    int crossings(List<int> samples) {
+      var n = 0;
+      for (var i = 1; i < samples.length; i++) {
+        if ((samples[i - 1] < 0) != (samples[i] < 0)) n++;
+      }
+      return n;
+    }
+
+    List<int> stretch(double speed, List<int> input) {
+      final stretcher = TimeStretcher(speed: speed);
+      final out = <int>[];
+      for (var i = 0; i < input.length; i += 2400) {
+        final end = math.min(input.length, i + 2400);
+        out.addAll(samplesOf(stretcher.process(pcm(input.sublist(i, end)))));
+      }
+      out.addAll(samplesOf(stretcher.flush()));
+      return out;
+    }
+
+    test('passes audio through unchanged at normal speed', () {
+      final input = sine(4800, 220);
+      expect(stretch(1, input), input);
+    });
+
+    test('shortens audio at higher speed without changing pitch', () {
+      final input = sine(48000, 220);
+      final out = stretch(1.5, input);
+      expect(out.length / input.length, closeTo(1 / 1.5, 0.03));
+      final rate = crossings(out) / out.length;
+      expect(rate / (crossings(input) / input.length), closeTo(1, 0.05));
+    });
+
+    test('lengthens audio at lower speed', () {
+      final input = sine(48000, 220);
+      final out = stretch(0.75, input);
+      expect(out.length / input.length, closeTo(1 / 0.75, 0.04));
     });
   });
 
@@ -345,7 +409,9 @@ void main() {
     });
 
     test('loadMark rejects malformed values', () async {
-      SharedPreferences.setMockInitialValues({'gateway_read_aloud_pos_x': 'bad'});
+      SharedPreferences.setMockInitialValues({
+        'gateway_read_aloud_pos_x': 'bad',
+      });
       final store = ReadAloudStore();
       expect(await store.loadMark('x'), isNull);
     });

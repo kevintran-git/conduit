@@ -7,6 +7,7 @@ class ReadAloudStore {
   static const String _posIndex = 'gateway_read_aloud_pos_index';
   static const String _ratePrefix = 'gateway_read_aloud_rate_';
   static const String _gainPrefix = 'gateway_read_aloud_gain_';
+  static const String _speedKey = 'gateway_read_aloud_speed';
   static const String _legacyPrefix = 'gateway_tts_pos_';
   static const int _maxEntries = 64;
 
@@ -64,6 +65,16 @@ class ReadAloudStore {
   Future<void> saveGain(String voiceKey, double gain) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble('$_gainPrefix$voiceKey', gain);
+  }
+
+  Future<double?> loadSpeed() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getDouble(_speedKey);
+  }
+
+  Future<void> saveSpeed(double speed) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_speedKey, speed);
   }
 
   Future<void> _clearLegacy(SharedPreferences prefs) async {

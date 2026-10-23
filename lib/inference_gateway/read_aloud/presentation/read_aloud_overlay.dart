@@ -1,4 +1,7 @@
 import 'dart:async';
+import 'dart:math' as math;
+
+import 'package:flutter/services.dart';
 
 import 'package:material_ui/material_ui.dart';
 
@@ -16,32 +19,51 @@ class ReadAloudOverlayHost {
 
   final GatewayTextToSpeechService service;
   final ValueNotifier<bool> _expanded = ValueNotifier(false);
+  final ValueNotifier<Object?> _swiped = ValueNotifier(null);
   OverlayEntry? _entry;
+  Timer? _closing;
+
+  bool get _active =>
+      service.readAloud.value != null || service.readAloudNotice.value != null;
 
   void _sync() {
-    final active =
-        service.readAloud.value != null ||
-        service.readAloudNotice.value != null;
-    if (active && _entry == null) {
-      final overlay = NavigationService.navigatorKey.currentState?.overlay;
-      if (overlay == null) return;
-      final entry = _entry = OverlayEntry(
-        builder: (_) => ReadAloudOverlay(service: service, expanded: _expanded),
-      );
-      overlay.insert(entry);
-    } else if (!active && _entry != null) {
-      _entry!.remove();
-      _entry = null;
-      _expanded.value = false;
+    if (!_active) {
+      if (_entry != null) {
+        _closing ??= Timer(const Duration(milliseconds: 400), _close);
+      }
+      return;
     }
+    _closing?.cancel();
+    _closing = null;
+    if (_entry != null) return;
+    final overlay = NavigationService.navigatorKey.currentState?.overlay;
+    if (overlay == null) return;
+    final entry = _entry = OverlayEntry(
+      builder: (_) => ReadAloudOverlay(
+        service: service,
+        expanded: _expanded,
+        swiped: _swiped,
+      ),
+    );
+    overlay.insert(entry);
+  }
+
+  void _close() {
+    _closing = null;
+    if (_active) return;
+    _entry?.remove();
+    _entry = null;
+    _expanded.value = false;
   }
 
   void dispose() {
     service.readAloud.removeListener(_sync);
     service.readAloudNotice.removeListener(_sync);
+    _closing?.cancel();
     _entry?.remove();
     _entry = null;
     _expanded.dispose();
+    _swiped.dispose();
   }
 }
 
@@ -50,10 +72,12 @@ class ReadAloudOverlay extends StatelessWidget {
     super.key,
     required this.service,
     required this.expanded,
+    required this.swiped,
   });
 
   final GatewayTextToSpeechService service;
   final ValueNotifier<bool> expanded;
+  final ValueNotifier<Object?> swiped;
 
   @override
   Widget build(BuildContext context) {
@@ -90,15 +114,27 @@ class ReadAloudOverlay extends StatelessWidget {
                         ),
                 ),
               ),
-              ValueListenableBuilder<ReadAloudSnapshot?>(
-                valueListenable: service.readAloud,
-                builder: (context, snapshot, _) => snapshot == null
-                    ? const SizedBox.shrink()
-                    : _MiniBar(
-                        snapshot: snapshot,
-                        service: service,
-                        onExpand: () => expanded.value = true,
-                      ),
+              ListenableBuilder(
+                listenable: Listenable.merge([service.readAloud, swiped]),
+                builder: (context, _) {
+                  final snapshot = service.readAloud.value;
+                  if (snapshot == null ||
+                      identical(swiped.value, snapshot.plan)) {
+                    return const SizedBox.shrink();
+                  }
+                  return Dismissible(
+                    key: ObjectKey(snapshot.plan),
+                    onDismissed: (_) {
+                      swiped.value = snapshot.plan;
+                      unawaited(service.stop());
+                    },
+                    child: _MiniBar(
+                      snapshot: snapshot,
+                      service: service,
+                      onExpand: () => expanded.value = true,
+                    ),
+                  );
+                },
               ),
             ],
           ),
@@ -128,6 +164,15 @@ class _MiniBar extends StatelessWidget {
       segment.end,
     );
     final total = snapshot.duration.inMilliseconds;
+    final left = Duration(
+      milliseconds:
+          (math.max(0, total - snapshot.position.inMilliseconds) /
+                  snapshot.speed)
+              .round(),
+    );
+    final remaining = total <= 0 || readAloudStatusLine(snapshot) != null
+        ? null
+        : '-${left.inMinutes}:${(left.inSeconds % 60).toString().padLeft(2, '0')}';
     final progress = total <= 0
         ? 0.0
         : (snapshot.position.inMilliseconds / total).clamp(0.0, 1.0);
@@ -158,6 +203,17 @@ class _MiniBar extends StatelessWidget {
                       ),
                     ),
                   ),
+                  if (remaining != null)
+                    Padding(
+                      padding: const EdgeInsets.only(left: Spacing.xs),
+                      child: Text(
+                        remaining,
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: theme.textSecondary,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ),
                   IconButton(
                     tooltip: 'Expand',
                     icon: Icon(Icons.open_in_full, color: theme.iconSecondary),
@@ -218,12 +274,35 @@ class _NoticeBar extends StatelessWidget {
             ),
             const SizedBox(width: Spacing.sm),
             Expanded(
-              child: Text(
-                notice.message,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodyMedium
-                    ?.copyWith(color: theme.textPrimary),
+              child: Padding(
+                padding: EdgeInsets.only(
+                  top: Spacing.sm,
+                  bottom: notice.actionLabel == null ? Spacing.sm : 0,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      notice.message,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodyMedium
+                          ?.copyWith(color: theme.textPrimary),
+                    ),
+                    if (notice.actionLabel != null)
+                      Align(
+                        alignment: AlignmentDirectional.centerEnd,
+                        child: TextButton(
+                          onPressed: () {
+                            onClose();
+                            notice.onAction?.call();
+                          },
+                          child: Text(notice.actionLabel!),
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ),
             IconButton(
@@ -275,7 +354,10 @@ class ReadAloudPlayButton extends StatelessWidget {
     return IconButton(
       tooltip: snapshot.isPaused ? 'Play' : 'Pause',
       icon: icon,
-      onPressed: () => unawaited(service.togglePause()),
+      onPressed: () {
+        unawaited(HapticFeedback.selectionClick());
+        unawaited(service.togglePause());
+      },
     );
   }
 }
