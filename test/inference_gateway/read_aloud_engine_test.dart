@@ -56,10 +56,18 @@ class _FakeSink implements PcmAudioSink {
 }
 
 class _FakeSession implements ik.ElevenLabsTtsSession {
-  _FakeSession(this.bytesPerSegment, this.texts);
+  _FakeSession(
+    this.bytesPerSegment,
+    this.texts, {
+    this.hang = false,
+    this.dropWhen,
+  });
 
   final int bytesPerSegment;
   final List<String> texts;
+  final bool hang;
+  final bool Function(String text)? dropWhen;
+  String _text = '';
   final StreamController<Uint8List> _controller =
       StreamController<Uint8List>.broadcast();
 
@@ -68,11 +76,17 @@ class _FakeSession implements ik.ElevenLabsTtsSession {
 
   @override
   void appendText(String text, {bool triggerGeneration = true}) {
+    _text = text;
     texts.add(text);
   }
 
   @override
   void flush() {
+    if (hang) return;
+    if (dropWhen?.call(_text) ?? false) {
+      _controller.addError(StateError('dropped'));
+      return;
+    }
     unawaited(_emit());
   }
 
@@ -101,12 +115,21 @@ class _FakeSession implements ik.ElevenLabsTtsSession {
 }
 
 class _FakeClient implements ik.ElevenLabsTtsClient {
-  _FakeClient({this.bytesPerSegment = 9600, this.fail = false});
+  _FakeClient({
+    this.bytesPerSegment = 9600,
+    this.fail = false,
+    this.hang = false,
+    this.silentVoices = const {},
+  });
 
   final int bytesPerSegment;
   final bool fail;
+  final bool hang;
+  final Set<String> silentVoices;
+  bool Function(String text)? dropWhen;
   int opens = 0;
   final List<String> texts = [];
+  final List<String> voices = [];
 
   @override
   String get baseUrl => 'http://fake';
@@ -120,8 +143,14 @@ class _FakeClient implements ik.ElevenLabsTtsClient {
     required String model,
   }) async {
     opens++;
+    voices.add(voice);
     if (fail) throw StateError('boom');
-    return _FakeSession(bytesPerSegment, texts);
+    return _FakeSession(
+      silentVoices.contains(voice) ? 0 : bytesPerSegment,
+      texts,
+      hang: hang,
+      dropWhen: dropWhen,
+    );
   }
 
   @override
@@ -167,9 +196,11 @@ class _Probe {
       ..onCompleted = () {
         if (!completed.isCompleted) completed.complete();
       }
-      ..onError = (message) {
+      ..onError = (message, heard) {
+        errorHeard = heard;
         if (!errored.isCompleted) errored.complete(message);
       }
+      ..onVoiceRejected = rejectedVoices.add
       ..onStatus = statuses.add
       ..onWord = (part, start, end) {
         words.add((part, start, end));
@@ -177,6 +208,8 @@ class _Probe {
   }
 
   int startedCount = 0;
+  bool? errorHeard;
+  final List<String> rejectedVoices = [];
   final Completer<void> completed = Completer<void>();
   final Completer<String> errored = Completer<String>();
   final List<ReadAloudStatus> statuses = [];
@@ -188,8 +221,10 @@ ReadAloudEngine _makeEngine(
   _FakeSink sink,
   Directory dir, {
   ReadAloudStore? store,
+  Duration firstAudioDeadline = const Duration(seconds: 15),
 }) {
   return ReadAloudEngine(
+    firstAudioDeadline: firstAudioDeadline,
     client: client,
     cache: _DirCache(dir),
     store: store ?? ReadAloudStore(),
@@ -299,18 +334,88 @@ void main() {
     await _disposeQuietly(engine);
   }, timeout: const Timeout(Duration(seconds: 30)));
 
-  test('names the voice when the gateway returns no audio', () async {
+  test('fails without retrying when the gateway returns no audio', () async {
     final client = _FakeClient(bytesPerSegment: 0);
     final engine = _makeEngine(client, _FakeSink(), dir);
     final probe = _Probe(engine);
     await playText(engine, three);
     final message = await probe.errored.future.timeout(
-      const Duration(seconds: 25),
+      const Duration(seconds: 5),
     );
-    expect(message, 'The gateway returned no audio for voice "v".');
+    expect(message, 'The gateway returned no audio.');
+    expect(probe.errorHeard, isFalse);
+    expect(probe.rejectedVoices, isEmpty);
     expect(engine.isActive, isFalse);
     await _disposeQuietly(engine);
   }, timeout: const Timeout(Duration(seconds: 30)));
+
+  test('falls back to the default voice when the voice is unknown', () async {
+    final client = _FakeClient(silentVoices: {'v'});
+    final sink = _FakeSink();
+    final engine = _makeEngine(client, sink, dir);
+    final probe = _Probe(engine);
+    await playText(engine, three);
+    await probe.completed.future.timeout(const Duration(seconds: 20));
+    expect(probe.rejectedVoices, ['v']);
+    expect(probe.errored.isCompleted, isFalse);
+    expect(sink.fedBytes, 28800);
+    expect(client.voices.last, '');
+    await _disposeQuietly(engine);
+  }, timeout: const Timeout(Duration(seconds: 30)));
+
+  test('gives up when no audio arrives before the deadline', () async {
+    final client = _FakeClient(hang: true);
+    final engine = _makeEngine(
+      client,
+      _FakeSink(),
+      dir,
+      firstAudioDeadline: const Duration(seconds: 1),
+    );
+    final probe = _Probe(engine);
+    await playText(engine, three).timeout(const Duration(seconds: 5));
+    final message = await probe.errored.future.timeout(
+      const Duration(seconds: 5),
+    );
+    expect(message, 'The gateway did not respond within 1 s.');
+    expect(probe.errorHeard, isFalse);
+    expect(engine.isActive, isFalse);
+    await _disposeQuietly(engine);
+  }, timeout: const Timeout(Duration(seconds: 30)));
+
+  test('stops at once while the first sentence is still loading', () async {
+    final client = _FakeClient(hang: true);
+    final engine = _makeEngine(client, _FakeSink(), dir);
+    final probe = _Probe(engine);
+    final playing = playText(engine, three);
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    await engine.stop().timeout(const Duration(seconds: 1));
+    await playing.timeout(const Duration(seconds: 1));
+    expect(engine.isActive, isFalse);
+    expect(probe.errored.isCompleted, isFalse);
+    await _disposeQuietly(engine);
+  }, timeout: const Timeout(Duration(seconds: 30)));
+
+  test('pauses at a lost sentence and retries it on resume', () async {
+    final client = _FakeClient()
+      ..dropWhen = (text) => text == 'Seven eight nine.';
+    final sink = _FakeSink();
+    final engine = _makeEngine(client, sink, dir);
+    final probe = _Probe(engine);
+    await playText(engine, three);
+    final deadline = DateTime.now().add(const Duration(seconds: 20));
+    while (!(engine.snapshot.value?.stalled ?? false)) {
+      expect(DateTime.now().isBefore(deadline), isTrue);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+    expect(engine.isPaused, isTrue);
+    expect(engine.snapshot.value!.segment, 2);
+    expect(probe.errored.isCompleted, isFalse);
+    client.dropWhen = null;
+    await engine.resume();
+    await probe.completed.future.timeout(const Duration(seconds: 20));
+    expect(sink.fedBytes, 28800);
+    await _disposeQuietly(engine);
+  }, timeout: const Timeout(Duration(seconds: 40)));
 
   test('stop ends the session without completing', () async {
     final client = _FakeClient(bytesPerSegment: 48000);

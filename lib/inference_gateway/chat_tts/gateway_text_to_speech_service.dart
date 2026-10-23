@@ -14,12 +14,20 @@ import 'package:conduit_core/utils/debug_logger.dart';
 import '../../features/chat/services/text_to_speech_service.dart';
 import '../../features/chat/services/tts_manager.dart';
 import '../../features/chat/voice_mode/chat_voice_mode_controller.dart';
+import '../config/gateway_catalog.dart';
 import '../config/gateway_providers.dart';
 import '../router/gateway_router_providers.dart';
 import '../read_aloud/presentation/read_aloud_overlay.dart';
 import '../read_aloud/read_aloud_engine.dart';
 import '../read_aloud/speech_text.dart';
 import 'gateway_chat_tts_speaker.dart';
+
+class ReadAloudNotice {
+  const ReadAloudNotice(this.message, {this.error = false});
+
+  final String message;
+  final bool error;
+}
 
 class GatewayTextToSpeechService extends TextToSpeechService {
   GatewayTextToSpeechService({
@@ -37,8 +45,11 @@ class GatewayTextToSpeechService extends TextToSpeechService {
   ReadAloudOverlayHost? _overlay;
 
   final ValueNotifier<ReadAloudSnapshot?> readAloud = ValueNotifier(null);
-  final ValueNotifier<String?> readAloudError = ValueNotifier(null);
-  Timer? _errorTimer;
+  final ValueNotifier<ReadAloudNotice?> readAloudNotice = ValueNotifier(null);
+  Timer? _noticeTimer;
+  String? _lastText;
+  bool _onDevice = false;
+  Future<bool> Function()? _initDevice;
 
   VoidCallback? _onStart;
   VoidCallback? _onComplete;
@@ -88,11 +99,22 @@ class GatewayTextToSpeechService extends TextToSpeechService {
       _onComplete?.call();
       _releaseWakelockIfIdle();
     };
-    engine.onError = (message) {
+    engine.onError = (message, heard) {
       _lastPart = -1;
-      _showReadAloudError(message);
-      _onError?.call(message);
-      _releaseWakelockIfIdle();
+      if (heard) {
+        _failReadAloud(message);
+      } else {
+        unawaited(_speakOnDevice(message));
+      }
+    };
+    engine.onVoiceRejected = (voice) {
+      _showNotice(
+        ReadAloudNotice(
+          'Voice "$voice" isn\'t available on the gateway. '
+          'Switched to the default voice.',
+        ),
+      );
+      unawaited(_forgetMissingVoice(voice));
     };
     engine.onWord = (part, start, end) {
       if (part != _lastPart) {
@@ -107,16 +129,63 @@ class GatewayTextToSpeechService extends TextToSpeechService {
     return _engine = engine;
   }
 
-  void _showReadAloudError(String message) {
-    _errorTimer?.cancel();
-    readAloudError.value = message;
-    _errorTimer = Timer(const Duration(seconds: 10), dismissReadAloudError);
+  void _showNotice(ReadAloudNotice notice) {
+    _noticeTimer?.cancel();
+    readAloudNotice.value = notice;
+    _noticeTimer = Timer(
+      Duration(seconds: notice.error ? 10 : 6),
+      dismissReadAloudNotice,
+    );
   }
 
-  void dismissReadAloudError() {
-    _errorTimer?.cancel();
-    _errorTimer = null;
-    readAloudError.value = null;
+  void dismissReadAloudNotice() {
+    _noticeTimer?.cancel();
+    _noticeTimer = null;
+    readAloudNotice.value = null;
+  }
+
+  void _failReadAloud(String message) {
+    _showNotice(ReadAloudNotice('Read aloud stopped. $message', error: true));
+    _onError?.call(message);
+    _releaseWakelockIfIdle();
+  }
+
+  Future<void> _speakOnDevice(String reason) async {
+    final text = _lastText;
+    final init = _initDevice;
+    if (text == null || init == null) {
+      _failReadAloud(reason);
+      return;
+    }
+    _onDevice = true;
+    readAloudTrace('device-fallback', {'reason': reason});
+    try {
+      final available = await init();
+      if (!_onDevice) return;
+      if (!available) {
+        _onDevice = false;
+        _failReadAloud(reason);
+        return;
+      }
+      _showNotice(
+        ReadAloudNotice('$reason Reading with the device voice instead.'),
+      );
+      await super.speak(text);
+    } catch (error) {
+      _onDevice = false;
+      _failReadAloud(reason);
+    }
+  }
+
+  Future<void> _forgetMissingVoice(String voice) async {
+    try {
+      final catalog = await _ref
+          .read(gatewayCatalogProvider.future)
+          .timeout(const Duration(seconds: 5));
+      if (catalog.voices.isEmpty || catalog.voices.contains(voice)) return;
+      if (_ref.read(gatewayConfigProvider).ttsVoice != voice) return;
+      _ref.read(gatewayConfigProvider.notifier).setTtsVoice('');
+    } catch (_) {}
   }
 
   void _handleReadAloudStatus(ReadAloudStatus status) {
@@ -176,6 +245,14 @@ class GatewayTextToSpeechService extends TextToSpeechService {
     double volume = 1.0,
     TtsEngine engine = TtsEngine.device,
   }) async {
+    _initDevice = () => super.initialize(
+      deviceVoice: deviceVoice,
+      serverVoice: serverVoice,
+      speechRate: speechRate,
+      pitch: pitch,
+      volume: volume,
+      engine: engine,
+    );
     if (_gatewayActive) return true;
     return super.initialize(
       deviceVoice: deviceVoice,
@@ -189,6 +266,7 @@ class GatewayTextToSpeechService extends TextToSpeechService {
 
   @override
   Future<void> speak(String text) async {
+    _onDevice = false;
     if (!_gatewayActive) {
       await _speaker?.stop();
       await _engine?.stop();
@@ -207,7 +285,8 @@ class GatewayTextToSpeechService extends TextToSpeechService {
     final config = _ref.read(gatewayConfigProvider);
     _lastPart = -1;
     _pauseNotified = false;
-    dismissReadAloudError();
+    _lastText = text;
+    dismissReadAloudNotice();
     _overlay ??= ReadAloudOverlayHost(service: this);
     unawaited(WakelockPlus.enable());
     final engine = await _ensureEngine();
@@ -279,7 +358,8 @@ class GatewayTextToSpeechService extends TextToSpeechService {
 
   @override
   Future<void> stop() async {
-    dismissReadAloudError();
+    _onDevice = false;
+    dismissReadAloudNotice();
     if (_speaker != null || _engine != null) {
       await _engine?.stop();
       await _speaker?.stop();
@@ -313,7 +393,7 @@ class GatewayTextToSpeechService extends TextToSpeechService {
       await _engine!.resume();
       return;
     }
-    if (_gatewayActive) return;
+    if (_gatewayActive && !_onDevice) return;
     await super.resume();
   }
 
@@ -356,9 +436,9 @@ class GatewayTextToSpeechService extends TextToSpeechService {
     final engine = _engine;
     _engine = null;
     await engine?.dispose();
-    _errorTimer?.cancel();
+    _noticeTimer?.cancel();
     readAloud.dispose();
-    readAloudError.dispose();
+    readAloudNotice.dispose();
     await super.dispose();
   }
 }
