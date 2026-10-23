@@ -223,8 +223,11 @@ class _StreamingMarkdownWidgetState
         _documentController.compiledStreamingRevision == patch.revision;
   }
 
+  bool get _selectionTooLarge =>
+      (_displayPartsMemo?.length ?? 0) > markdownChunkedPartInflationThreshold;
+
   void _handleRenderGateChanged() {
-    if (!mounted) return;
+    if (!mounted || _selectionTooLarge) return;
     // The gate flips to incomplete while a chunked descendant inflates —
     // that is mid-build, where an ancestor setState is illegal. Both edges
     // of the gate only need to take visual effect by the next frame.
@@ -817,7 +820,8 @@ class _StreamingMarkdownWidgetState
     if (widget.isStreaming ||
         _settledPreparationPending ||
         !hasFreshCompiledDocument ||
-        !_renderGate.isComplete) {
+        !_renderGate.isComplete ||
+        _selectionTooLarge) {
       return result;
     }
 

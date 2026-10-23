@@ -333,12 +333,25 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
         : noteMarkdownFromDocument(controller.document);
   }
 
+  int _cachedCharCount = 0;
+  Timer? _wordCountTimer;
+
   void _updateWordCount() {
-    final text = _countedText.trim();
+    _wordCountTimer?.cancel();
+    final plain = _countedText;
+    _cachedCharCount = plain.length;
+    final text = plain.trim();
     _cachedWordCount = text.isEmpty ? 0 : text.split(_whitespacePattern).length;
   }
 
-  int get _charCount => _countedText.length;
+  void _scheduleWordCount() {
+    _wordCountTimer?.cancel();
+    _wordCountTimer = Timer(const Duration(milliseconds: 600), () {
+      if (mounted) setState(_updateWordCount);
+    });
+  }
+
+  int get _charCount => _cachedCharCount;
 
   /// The text counted for words and characters: file cards are not text.
   String get _countedText => _contentPlainText.replaceAll(
@@ -484,6 +497,7 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
   void dispose() {
     _saveDebounce?.cancel();
     _voiceSub?.cancel();
+    _wordCountTimer?.cancel();
     _recovery.dispose();
     _attachments.dispose();
     // The service is the app-wide provider instance shared with the chat
@@ -860,7 +874,7 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
       setState(() => _hasChanges = true);
     }
     _debounceSave();
-    _updateWordCount();
+    _scheduleWordCount();
   }
 
   void _debounceSave() {
@@ -2742,6 +2756,7 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
           _savedMarkdown = '';
           _linkBase = '';
           _cachedWordCount = 0;
+          _cachedCharCount = 0;
           _hasChanges = false;
         });
         return;
