@@ -2627,7 +2627,7 @@ void main() {
         final visible = container.read(chatMessagesProvider);
         return visible.length == 2 &&
             visible.first.id == 'user-auth-b' &&
-            visible.first.timestamp.year == 1970;
+            visible.first.timestamp.toUtc().year == 1970;
       });
       final bBefore = jsonEncode(
         container.read(chatMessagesProvider).map((m) => m.toJson()).toList(),
