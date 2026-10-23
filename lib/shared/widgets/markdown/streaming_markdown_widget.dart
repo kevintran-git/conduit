@@ -114,26 +114,14 @@ class StreamingMarkdownWidget extends ConsumerStatefulWidget {
   final Widget Function(Uri uri, String? title, String? alt)?
   imageBuilderOverride;
 
-  /// Sources for inline citation badge rendering.
-  /// When provided, [1] patterns will be rendered as clickable badges.
   final List<ChatSourceReference>? sources;
 
-  /// Callback when a source badge is tapped.
   final void Function(int sourceIndex)? onSourceTap;
 
-  /// Composer target that should receive "Ask Conduit" insertions.
-  ///
-  /// When null, this markdown surface uses Flutter's default selection menu.
   final String? askConduitComposerTargetId;
 
-  /// Optional scope used to preserve state for remounted markdown blocks.
   final String? stateScopeId;
 
-  /// Controls fading newly appended visible text while streaming.
-  ///
-  /// This stays enabled by default for existing standalone callers. Live chat
-  /// explicitly disables it so token updates remain immediate; low-frequency
-  /// preview surfaces can retain the decorative reveal.
   final bool enableStreamingTextFade;
 
   @visibleForTesting
@@ -151,8 +139,6 @@ class StreamingMarkdownWidget extends ConsumerStatefulWidget {
   @visibleForTesting
   final VoidCallback? debugOnStreamingRefreshFrame;
 
-  /// Invoked each time the compiled view rebuilds its cached base span tree
-  /// (once per content change, never per fade frame).
   @visibleForTesting
   final VoidCallback? debugOnBaseRender;
 
@@ -169,17 +155,9 @@ class _StreamingMarkdownWidgetState
   final GlobalKey _markdownContentKey = GlobalKey();
   final Map<String, CompiledMarkdownDocument> _displayPartDocumentCache =
       <String, CompiledMarkdownDocument>{};
-  // buildMarkdownDisplayParts re-derives one sub-document per root block and
-  // deep-compares each against the cache — O(whole message) string work. The
-  // widget rebuilds far more often than the compiled document changes (shell
-  // rebuilds, fade frames), so memoize the split by document identity.
   CompiledMarkdownDocument? _displayPartsSourceDocument;
   bool _displayPartsWereStreaming = false;
   List<MarkdownDisplayPart>? _displayPartsMemo;
-  // Unique per-instance prefix used when no stateScopeId is supplied, so two
-  // scope-less StreamingMarkdownWidgets on the same route don't share
-  // PageStorage keys (markdown_compile_service reuses block ids across unrelated
-  // documents, so a raw partId is not unique on its own).
   static int _scopelessInstanceCounter = 0;
   static int _preparationSessionCounter = 0;
   late final String _scopelessFallbackScopeId =
@@ -203,8 +181,6 @@ class _StreamingMarkdownWidgetState
   bool _isAppForeground = true;
   bool _isRouteVisible = true;
   ImageBuilder? _adaptedImageBuilder;
-  // Chunked block inflation registers here while revealing; completion
-  // re-arms SelectionArea wrapping via the listener.
   final MarkdownRenderGate _renderGate = MarkdownRenderGate();
 
   CompiledMarkdownDocument? get _compiledDocument =>
@@ -222,11 +198,11 @@ class _StreamingMarkdownWidgetState
         _documentController.compiledStreamingRevision == patch.revision;
   }
 
+  bool get _selectionTooLarge =>
+      (_displayPartsMemo?.length ?? 0) > markdownChunkedPartInflationThreshold;
+
   void _handleRenderGateChanged() {
-    if (!mounted) return;
-    // The gate flips to incomplete while a chunked descendant inflates —
-    // that is mid-build, where an ancestor setState is illegal. Both edges
-    // of the gate only need to take visual effect by the next frame.
+    if (!mounted || _selectionTooLarge) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) setState(() {});
     });
@@ -261,23 +237,8 @@ class _StreamingMarkdownWidgetState
     }
   }
 
-  /// Above this size a settled mount never prepares/compiles synchronously:
-  /// the multi-pass normalization + parse of a very large body froze the UI
-  /// for over a second when opening a conversation cold. Over-cap bodies
-  /// mount an approximate skeleton and compile off-frame; the one-time
-  /// extent correction when the real document lands is absorbed by the
-  /// timeline's anchor maintenance / latest-follow, and is invisible next to
-  /// a freeze. Typical assistant messages stay well below this cap, so
-  /// scroll-up-through-history keeps its exact-extent mount guarantee.
   static const int _settledSynchronousMountCharCap = 20000;
 
-  /// Resolves a settled body at mount time.
-  ///
-  /// Settled rows must mount at their final extent or the timeline jumps
-  /// while scrolling through history, so mounts are synchronous when cheap:
-  /// memoized prepare + cached compile apply directly with no string work,
-  /// and uncached bodies under [_settledSynchronousMountCharCap] prepare and
-  /// compile in-frame. Only over-cap giants go async behind a skeleton.
   void _mountSettledContent(MarkdownCompileService compiler) {
     final content = widget.content;
     final memoizedPrepared = compiler.peekSettledPrepared(content);
@@ -289,8 +250,6 @@ class _StreamingMarkdownWidgetState
         return;
       }
     }
-    // Widget tests stay on the synchronous deterministic path so settled
-    // fixtures render fully on the first pump regardless of size.
     if (_isWidgetTest || content.length <= _settledSynchronousMountCharCap) {
       final prepared =
           memoizedPrepared ?? prepareMarkdownContent(content, streaming: false);
@@ -306,20 +265,10 @@ class _StreamingMarkdownWidgetState
   }
 
   void _initStreamingDeferredMount() {
-    // Long normalization performs several full-string passes. For a row that
-    // mounts mid-stream, keep it off the first UI frame and let the existing
-    // generation checks reject stale results as the stream advances.
     if (widget.content.length > markdownSynchronousPrepareThreshold) {
-      // Route a long initial snapshot through the same coalescing window as
-      // subsequent token updates. Starting it immediately would make the
-      // seed snapshot consume a worker slot even when a newer stream value
-      // arrives during the first frame.
       _markPendingStreamingContent(widget.content);
       _scheduleStreamingRefresh();
     } else {
-      // Test doubles and platform-specific backends may still request the
-      // async path for small inputs. Those are cheap and should remain
-      // available on the initial frame.
       unawaited(_refreshStreamingSnapshot(widget.content));
     }
   }
@@ -368,8 +317,6 @@ class _StreamingMarkdownWidgetState
         _settledPreparationPending = false;
         _applyPreparedSnapshotIfNeeded(
           prepareMarkdownContent(widget.content, streaming: false),
-          // A scope change means a new message/version, not a continuation of
-          // the current content. Clear stale content while the new body compiles.
           clearStaleDocument: scopeChanged,
         );
       } else {
@@ -408,16 +355,6 @@ class _StreamingMarkdownWidgetState
       return;
     }
 
-    // Deferred streaming path: the body needs an async compile, so the new
-    // document won't be ready this frame. On a scope change, clear the previous
-    // scope's document now — deferring the clear to the scheduled refresh would
-    // let the old document paint for one frame under the new scope (#541). The
-    // scheduled refresh below then compiles the new content. (The sync paths
-    // above clear/replace the document synchronously and don't need this.)
-    // A settled preparation may still be running from the previous widget
-    // state. Its generation check prevents publication, while clearing its
-    // queued successor and loading flag keeps streaming blank until its own
-    // snapshot is ready (streaming must never show the settled skeleton).
     _pendingSettledSnapshot = null;
     _settledPreparationPending = false;
     if (scopeChanged) {
@@ -534,10 +471,6 @@ class _StreamingMarkdownWidgetState
       return;
     }
     _streamingRefreshFrameScheduled = true;
-    // Start preparation before the build phase. A post-frame callback would
-    // consume a platform-view composition frame just to launch the work, then
-    // require another frame to show the result. The native Liquid Glass chrome
-    // stays mounted; only the mutable Markdown tail is refreshed.
     WidgetsBinding.instance.scheduleFrameCallback((_) {
       _streamingRefreshFrameScheduled = false;
       if (!mounted ||
@@ -654,18 +587,12 @@ class _StreamingMarkdownWidgetState
           .read(markdownCompileServiceProvider)
           .prepareContent(content, streaming: false);
     } catch (_) {
-      // Preserve rendering if the long-lived worker is unavailable. The
-      // service normally handles this fallback itself; this also protects test
-      // doubles and unexpected disposal races.
       preparedContent = prepareMarkdownContent(content, streaming: false);
     }
     if (!mounted ||
         generation != _snapshotGeneration ||
         widget.isStreaming ||
         widget.content != content) {
-      // A stale refresh must not leave the pending flag set forever: when no
-      // newer settled snapshot is queued to clear it, a blank snapshot would
-      // otherwise render an indefinite loading skeleton.
       if (mounted && _pendingSettledSnapshot == null) {
         _settledPreparationPending = false;
       }
@@ -754,9 +681,6 @@ class _StreamingMarkdownWidgetState
     );
   }
 
-  /// Adapts the legacy [imageBuilderOverride] callback
-  /// to the [ImageBuilder] signature used by the custom
-  /// renderer.
   ImageBuilder? _adaptImageBuilder(
     Widget Function(Uri uri, String? title, String? alt)? override,
   ) {
@@ -791,12 +715,6 @@ class _StreamingMarkdownWidgetState
     if (compiledDocument == null) {
       return const SizedBox.shrink();
     }
-    // Once a compiled document exists, always render it — even when it is stale
-    // (a newer snapshot is still compiling). Replacing already-rendered content
-    // with a placeholder/blank causes the streaming body to flash whenever the
-    // turn phase flips to non-streaming mid-response (issue #540). The stale
-    // document is valid markdown and is superseded by `_applyCompiledDocumentState`
-    // within a frame once the fresh compile lands.
 
     final result = KeyedSubtree(
       key: _markdownContentKey,
@@ -806,17 +724,11 @@ class _StreamingMarkdownWidgetState
       ),
     );
 
-    // Only wrap in SelectionArea when not streaming, no settled normalization
-    // is pending, AND the rendered document is fresh for the current content.
-    // A stale/equivalent document shown during ongoing updates (the
-    // responseDone-gap growing-content path that #540's fix now keeps on screen)
-    // must not be made selectable: SelectionArea over rapidly-changing content
-    // triggers concurrent-modification errors in Flutter's selection system.
-    // Chunked inflation mutates children per frame, so it also holds this off.
     if (widget.isStreaming ||
         _settledPreparationPending ||
         !hasFreshCompiledDocument ||
-        !_renderGate.isComplete) {
+        !_renderGate.isComplete ||
+        _selectionTooLarge) {
       return result;
     }
 
@@ -883,21 +795,6 @@ class _StreamingMarkdownWidgetState
         ),
     ];
 
-    // This column — not the per-part block columns — is where a giant
-    // settled message inflates: the display-part split produces one
-    // single-block sub-document per root block, so the sub-documents are
-    // always under ConduitMarkdownWidget's own chunk threshold and the
-    // freeze lives in inflating thousands of parts here in one frame.
-    //
-    // The chunked column is used unconditionally (it renders a plain Column
-    // when everything is revealed) so the body's widget type never changes.
-    // An earlier version latched a type choice on the first build, which
-    // left a body that mounted small and later grew past the threshold —
-    // e.g. a local stub replaced by full server content — on the plain
-    // column, re-creating the multi-second inflation freeze. Streaming
-    // reveals immediately (blocks arrive one at a time; the live tail must
-    // never trail the pin/extent math), and that progress is monotonic, so
-    // the streaming→settled flip re-inflates nothing.
     return ChunkedBlockColumn(
       revealImmediately: widget.isStreaming,
       children: partWidgets,
@@ -925,10 +822,6 @@ class _StreamingMarkdownWidgetState
     return stableParts;
   }
 
-  /// Builds markdown with inline citation badges.
-  ///
-  /// Citations like [1], [2] are rendered as clickable
-  /// badges inline with the text.
   Widget _buildMarkdownWithCitations({
     required CompiledMarkdownDocument document,
     required String? stateScopeId,
@@ -1072,10 +965,6 @@ class _StreamingMarkdownWidgetState
     if (hasFreshCompiledDocument) {
       return false;
     }
-    // The loading skeleton is strictly a first-paint state: it may only appear
-    // when no compiled document exists yet. Once any valid document has been
-    // rendered, a stale-but-valid document is kept on screen during async
-    // recompiles instead of regressing to the skeleton (issue #540).
     if (compiledDocument != null) {
       return false;
     }
@@ -1086,8 +975,6 @@ class _StreamingMarkdownWidgetState
     if (!mounted) {
       return;
     }
-    // Rebuild so the freshly compiled document (or a cleared document) is
-    // reflected. Any stale document already on screen is superseded here.
     setState(() {});
     scheduleEmbeddedPreviewEligibilityRecheck();
   }

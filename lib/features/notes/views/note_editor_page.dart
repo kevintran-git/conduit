@@ -228,12 +228,25 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
     return controller == null ? '' : markdownFromDocument(controller.document);
   }
 
+  int _cachedCharCount = 0;
+  Timer? _wordCountTimer;
+
   void _updateWordCount() {
-    final text = _contentPlainText.trim();
+    _wordCountTimer?.cancel();
+    final plain = _contentPlainText;
+    _cachedCharCount = plain.length;
+    final text = plain.trim();
     _cachedWordCount = text.isEmpty ? 0 : text.split(_whitespacePattern).length;
   }
 
-  int get _charCount => _contentPlainText.length;
+  void _scheduleWordCount() {
+    _wordCountTimer?.cancel();
+    _wordCountTimer = Timer(const Duration(milliseconds: 600), () {
+      if (mounted) setState(_updateWordCount);
+    });
+  }
+
+  int get _charCount => _cachedCharCount;
 
   @override
   void initState() {
@@ -327,6 +340,7 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
   void dispose() {
     _saveDebounce?.cancel();
     _voiceSub?.cancel();
+    _wordCountTimer?.cancel();
     _recovery.dispose();
     _attachments.dispose();
     if (_isRecording && _ownsDictationRun) _voiceService?.stopListening();
@@ -484,7 +498,7 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
       setState(() => _hasChanges = true);
     }
     _debounceSave();
-    _updateWordCount();
+    _scheduleWordCount();
   }
 
   void _debounceSave() {
@@ -1584,9 +1598,7 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
           physics: const AlwaysScrollableScrollPhysics(),
           padding: EdgeInsets.fromLTRB(
             Spacing.inputPadding,
-            topPadding +
-                appBarHeight +
-                Spacing.sm,
+            topPadding + appBarHeight + Spacing.sm,
             Spacing.inputPadding,
             120,
           ),
@@ -1823,8 +1835,7 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
       final syncEngine = ref.read(syncEngineProvider.notifier);
       await syncEngine.requestPull(reason: 'note-editor-refresh');
       await syncEngine.reconcileNow();
-    } catch (_) {
-    }
+    } catch (_) {}
     if (!mounted ||
         !_isCurrentNoteSession(api: api, db: db, authEpoch: authEpoch)) {
       return;
@@ -1863,6 +1874,7 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
           _installContentDocument(documentFromMarkdown(''));
           _savedMarkdown = '';
           _cachedWordCount = 0;
+          _cachedCharCount = 0;
           _hasChanges = false;
         });
         return;
