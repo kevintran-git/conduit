@@ -1,6 +1,5 @@
 import 'package:conduit/inference_gateway/read_aloud/device_read_aloud.dart';
-import 'package:conduit/inference_gateway/read_aloud/read_aloud_engine.dart';
-import 'package:conduit/inference_gateway/read_aloud/read_aloud_plan.dart';
+import 'package:inference_kit/read_aloud.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {

@@ -7,8 +7,7 @@ import 'package:flutter/services.dart';
 
 import '../../../shared/theme/theme_extensions.dart';
 import '../../chat_tts/gateway_text_to_speech_service.dart';
-import '../read_aloud_engine.dart';
-import '../read_aloud_plan.dart';
+import 'package:inference_kit/read_aloud.dart';
 import 'read_aloud_overlay.dart';
 
 const List<double> readAloudSpeeds = [0.75, 1, 1.25, 1.5, 1.75, 2];

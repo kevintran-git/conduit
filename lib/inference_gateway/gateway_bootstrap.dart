@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:inference_kit/inference_kit.dart' as ik;
+import 'package:inference_kit/read_aloud.dart' show readAloudTraceSink;
 import 'package:pcm_call_audio/pcm_call_audio.dart' as pcm;
 
 import 'package:conduit_core/providers/app_providers.dart'
@@ -27,7 +28,8 @@ gatewayProviderOverrides() {
       DebugLogger.log(message, scope: scope, data: data);
       return;
     }
-    if (scope != null && scope.startsWith('gateway/')) {
+    if (scope != null &&
+        (scope.startsWith('gateway/') || scope == 'read-aloud')) {
       final detail = '$error'.replaceAllMapped(
         RegExp(r"(api_key=|Bearer )[^&\s']+"),
         (m) => '${m[1]}***',
@@ -44,6 +46,7 @@ gatewayProviderOverrides() {
   }
 
   ik.IkLog.sink = logToDebugLogger;
+  readAloudTraceSink = (event, data) => debugPrint('[read-aloud] $event $data');
   pcm.PcmLog.sink = logToDebugLogger;
   return [
     apiServiceProvider.overrideWith(gatewayApiServiceProviderOverride),

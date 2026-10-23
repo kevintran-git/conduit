@@ -1,8 +1,7 @@
+import 'package:inference_kit/read_aloud.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-typedef ReadAloudMark = ({int part, int offset});
-
-class ReadAloudStore {
+class ReadAloudStore implements ReadAloudPrefs {
   static const String _posPrefix = 'gateway_read_aloud_pos_';
   static const String _posIndex = 'gateway_read_aloud_pos_index';
   static const String _ratePrefix = 'gateway_read_aloud_rate_';
@@ -13,6 +12,7 @@ class ReadAloudStore {
 
   bool _legacyCleared = false;
 
+  @override
   Future<void> saveMark(String key, ReadAloudMark mark) async {
     final prefs = await SharedPreferences.getInstance();
     await _clearLegacy(prefs);
@@ -27,6 +27,7 @@ class ReadAloudStore {
     await prefs.setStringList(_posIndex, index);
   }
 
+  @override
   Future<ReadAloudMark?> loadMark(String key) async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString('$_posPrefix$key');
@@ -39,6 +40,7 @@ class ReadAloudStore {
     return (part: part, offset: offset);
   }
 
+  @override
   Future<void> clearMark(String key) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('$_posPrefix$key');
@@ -47,31 +49,37 @@ class ReadAloudStore {
     await prefs.setStringList(_posIndex, index);
   }
 
+  @override
   Future<double?> loadRate(String voiceKey) async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getDouble('$_ratePrefix$voiceKey');
   }
 
+  @override
   Future<void> saveRate(String voiceKey, double msPerWeight) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble('$_ratePrefix$voiceKey', msPerWeight);
   }
 
+  @override
   Future<double?> loadGain(String voiceKey) async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getDouble('$_gainPrefix$voiceKey');
   }
 
+  @override
   Future<void> saveGain(String voiceKey, double gain) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble('$_gainPrefix$voiceKey', gain);
   }
 
+  @override
   Future<double?> loadSpeed() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getDouble(_speedKey);
   }
 
+  @override
   Future<void> saveSpeed(double speed) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble(_speedKey, speed);

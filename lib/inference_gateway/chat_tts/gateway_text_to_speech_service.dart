@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:inference_kit/inference_kit.dart' as ik;
+import 'package:inference_kit/read_aloud.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'package:conduit_core/models/backend_config.dart';
@@ -21,9 +22,8 @@ import '../config/gateway_providers.dart';
 import '../router/gateway_router_providers.dart';
 import '../read_aloud/presentation/read_aloud_overlay.dart';
 import '../read_aloud/device_read_aloud.dart';
-import '../read_aloud/read_aloud_engine.dart';
-import '../read_aloud/read_aloud_plan.dart';
-import '../read_aloud/speech_text.dart';
+import '../read_aloud/read_aloud_adapters.dart';
+import '../read_aloud/read_aloud_store.dart';
 import 'gateway_chat_tts_speaker.dart';
 
 class ReadAloudNotice {
@@ -52,7 +52,8 @@ class GatewayTextToSpeechService extends TextToSpeechService {
   GatewayChatTtsSpeaker? _speaker;
   ik.ElevenLabsTtsClient? _speakerClient;
   ReadAloudEngine? _engine;
-  ik.ElevenLabsTtsClient? _engineClient;
+  String? _engineEndpoint;
+  ConduitReadAloudHost? _engineHost;
   ReadAloudOverlayHost? _overlay;
 
   final ValueNotifier<ReadAloudSnapshot?> readAloud = ValueNotifier(null);
@@ -95,17 +96,30 @@ class GatewayTextToSpeechService extends TextToSpeechService {
   }
 
   Future<ReadAloudEngine> _ensureEngine() async {
-    final liveClient = _ref.read(gatewayElevenLabsClientProvider);
+    final config = _ref.read(gatewayConfigProvider);
+    final endpoint = '${config.baseUrl}\u0000${config.apiKey}';
     final stale = _engine;
-    if (stale != null && !identical(_engineClient, liveClient)) {
+    if (stale != null && _engineEndpoint != endpoint) {
       _engine = null;
       await stale.dispose();
+      await _engineHost?.dispose();
       readAloud.value = null;
     }
-    _engineClient = liveClient;
+    _engineEndpoint = endpoint;
     final existing = _engine;
     if (existing != null) return existing;
-    final engine = ReadAloudEngine(client: liveClient);
+    final host = _engineHost = ConduitReadAloudHost();
+    final engine = ReadAloudEngine(
+      source: GatewaySpeechSource(
+        baseUrl: config.baseUrl,
+        apiKey: config.apiKey,
+      ),
+      output: SpeakerPcmOutput(),
+      cache: TtsReadAloudCache(),
+      prefs: ReadAloudStore(),
+      host: host,
+    );
+    host.engine = engine;
     engine.onStarted = () => _onStart?.call();
     engine.onStatus = _handleReadAloudStatus;
     engine.onCompleted = () {
@@ -619,6 +633,7 @@ class GatewayTextToSpeechService extends TextToSpeechService {
     final engine = _engine;
     _engine = null;
     await engine?.dispose();
+    await _engineHost?.dispose();
     _noticeTimer?.cancel();
     readAloud.dispose();
     readAloudNotice.dispose();
