@@ -178,8 +178,6 @@ void main() {
     );
   });
 
-  // Open WebUI 0.12.1 ChannelItem.svelte: a channel set to mentions only
-  // shows no unread badge.
   testWidgets('a muted channel hides its unread badge and offers the '
       'notification setting', (tester) async {
     final controllers = SidebarTestSidebarHarnessControllers(
@@ -235,7 +233,6 @@ void main() {
       actions.take(2).map((action) => action.label),
       ['All messages', 'Mentions only'],
     );
-    // The current choice carries the check.
     expect(actions[1].materialIcon, Icons.check_rounded);
     expect(actions[0].materialIcon, isNot(Icons.check_rounded));
   });
@@ -246,18 +243,19 @@ void main() {
     final controllers = SidebarTestSidebarHarnessControllers(
       initialTab: SidebarTabId.notes,
     );
-    const note = Note(
+    final editedAt = DateTime(2026, 1, 1, 12).microsecondsSinceEpoch * 1000;
+    final note = Note(
       id: 'hierarchy-note',
       title: 'Project brief',
-      data: NoteData(
+      data: const NoteData(
         content: NoteContent(md: 'Supporting description for the note'),
       ),
-      createdAt: 1767225600000000000,
-      updatedAt: 1767225600000000000,
+      createdAt: editedAt,
+      updatedAt: editedAt,
     );
 
     await tester.pumpWidget(
-      sidebarTestBuildHarness(controllers: controllers, notes: const [note]),
+      sidebarTestBuildHarness(controllers: controllers, notes: [note]),
     );
     await tester.pumpAndSettle();
 
@@ -513,7 +511,6 @@ void main() {
       ],
     );
     addTearDown(container.dispose);
-    // Loaded at sign-in, before the gender was set from another client.
     await container.read(accountProfileProvider.future);
 
     await tester.pumpWidget(
@@ -533,10 +530,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // Opened at once on the cached copy...
     expect(presented, isNotNull);
     expect(presented!.profile.gender, isNull);
-    // ...which the server copy then replaces in the open sheet.
     expect(profileUpdates, hasLength(1));
     expect(profileUpdates.single['gender'], 'male');
     expect(profileUpdates.single['dateOfBirth'], '1990-04-02');
@@ -598,8 +593,6 @@ void main() {
           expect(items, isEmpty);
           return;
         }
-        // Both the flat menu and the sections carry it, and selecting it
-        // dismisses the sheet and reports the id the app handles.
         expect(items, hasLength(2));
         for (final item in items) {
           expect(item.title, 'Personal connections');
@@ -666,8 +659,6 @@ void main() {
           expect(items, isEmpty);
           return;
         }
-        // Both the flat menu and the sections carry it, and selecting it
-        // dismisses the sheet and reports the id the app handles.
         expect(items, hasLength(2));
         for (final item in items) {
           expect(item.title, 'Scheduled tasks');
@@ -734,8 +725,6 @@ void main() {
           expect(items, isEmpty);
           return;
         }
-        // Both the flat menu and the sections carry it, and selecting it
-        // dismisses the sheet and reports the id the app handles.
         expect(items, hasLength(2));
         for (final item in items) {
           expect(item.title, 'Calendar');
@@ -857,7 +846,6 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // The sheet must not open on empty fields that a save would then write.
     expect(presented, isNotNull);
     expect(presented!.profile.gender, 'male');
     expect(presented!.profile.dateOfBirth, '1990-04-02');
@@ -898,7 +886,6 @@ void main() {
           currentUserProvider.overrideWith((ref) async => user),
           apiServiceProvider.overrideWithValue(null),
           hermesOnlyModeProvider.overrideWithValue(false),
-          // Never loaded, and the refresh fails: no profile to edit.
           accountProfileProvider.overrideWith(_UnloadedAccountProfile.new),
           sidebarNativeProfilePresenterProvider.overrideWithValue((_) async {
             nativePresentationCalls++;
@@ -919,7 +906,6 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // The native editor would offer empty fields that a save writes back.
     expect(nativePresentationCalls, 0);
     expect(find.text('Settings destination'), findsOneWidget);
   });
@@ -1003,8 +989,6 @@ void main() {
   });
 }
 
-/// Holds a profile loaded before the user set their gender elsewhere; the
-/// server now has the gender and birth date.
 class _ServerAccountProfile extends AccountProfile {
   static const _server = AccountMetadata(
     id: 'user-1',
@@ -1031,8 +1015,6 @@ class _ServerAccountProfile extends AccountProfile {
   }
 }
 
-/// Holds a loaded profile, and loses the server on refresh the way the real
-/// provider does: its state goes to loading, then to an error with no value.
 class _UnreachableAccountProfile extends AccountProfile {
   @override
   Future<AccountMetadata?> build() async => const AccountMetadata(
@@ -1052,7 +1034,6 @@ class _UnreachableAccountProfile extends AccountProfile {
   }
 }
 
-/// A profile that never loaded, and whose refresh fails.
 class _UnloadedAccountProfile extends AccountProfile {
   @override
   Future<AccountMetadata?> build() async => null;

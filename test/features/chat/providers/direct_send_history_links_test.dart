@@ -143,9 +143,6 @@ final class _SwitchableRemapSyncEngine extends SyncEngine {
 
   Future<void> disposeStreams() async {
     if (!_aCancellationGate.isCompleted) _aCancellationGate.complete();
-    // The hostile single-subscription stream has no listener after dispatch.
-    // Closing marks it closed synchronously, but its orphaned done future is
-    // not a meaningful fixture-cleanup contract.
     unawaited(_a.close().catchError((_) {}));
     await _b.close();
   }
@@ -1085,9 +1082,6 @@ _createInvalidatedOwnerRefreshHarness(
   );
 }
 
-// Harness for a remappable OpenWebUI-stored direct chat: the chat id can move
-// under a live run, which is the only path that rebinds the private direct
-// stop index while the visible conversation keeps its pre-remap id.
 Future<
   ({
     ProviderContainer container,
@@ -2239,9 +2233,6 @@ void main() {
     profiles.gate.complete([profile]);
 
     await expectLater(send, throwsA(isA<Exception>()));
-    // Direct reservations are created only after the optimistic turn is
-    // installed. Preserving the exact list proves route preparation stopped
-    // before both reservation and provider dispatch.
     expect(
       identical(container.read(chatMessagesProvider), visibleBeforeSend),
       isTrue,
@@ -2548,7 +2539,7 @@ void main() {
         final visible = container.read(chatMessagesProvider);
         return visible.length == 2 &&
             visible.first.id == 'user-auth-b' &&
-            visible.first.timestamp.year == 1970;
+            visible.first.timestamp.toUtc().year == 1970;
       });
       final bBefore = jsonEncode(
         container.read(chatMessagesProvider).map((m) => m.toJson()).toList(),
@@ -3072,9 +3063,6 @@ void main() {
         .read(chatMessagesProvider.notifier)
         .setMessages(directChat.messages);
 
-    // Hermes session binding also writes this process-global raw-id remap.
-    // Leave one behind to model switching from Hermes to a direct-local chat
-    // whose id happens to collide with the old Hermes source id.
     container
         .read(activeConversationInPlaceRemapProvider.notifier)
         .mark(fromId: directChat.id, toId: 'local:hermes_stale-session');
@@ -3105,8 +3093,6 @@ void main() {
     run.add(const DirectContentDelta('Owned by direct X'));
     await Future<void>.delayed(Duration.zero);
 
-    // Cancellation must address the direct-local X key, not the stale
-    // backend-agnostic remap destination.
     final cancellation = runRegistry.cancel(directOwnerKey);
     expect(cancellation, isNotNull);
     await run.close();
@@ -3415,8 +3401,6 @@ void main() {
         ),
       );
 
-      // Mirrors ChatPage's recovery boundary: the failure may only address
-      // the placeholder reported by this exact send, never chat B's tail.
       recoverFailedChatSend(container, failure, pendingSend);
 
       final visible = container.read(chatMessagesProvider).last;
@@ -5459,16 +5443,6 @@ void main() {
     },
   );
 
-  // Characterization of the private direct stop index (`_DirectRunStopIndex`
-  // in lib/features/chat/providers/chat_providers.dart). Neither the class nor
-  // its provider is reachable from a test, so these three tests pin it through
-  // the only consumer of its lookup: the direct branch of
-  // `stopGenerationProvider`, which falls back to resolving a live run by
-  // assistant message identity when the visible conversation no longer names
-  // the run's owner scope.
-  //
-  // Baseline (`track`, no lookup needed): while the conversation still names
-  // the run owner, stop cancels through the owner key directly.
   test('stop cancels a direct run through its unremapped owner key', () async {
     final harness = await _createRemappableDirectHarness('stop-index-owner');
     final container = harness.container;
@@ -5497,11 +5471,7 @@ void main() {
 
     container.read(stopGenerationProvider)();
     expect(run.run.isCancelled, isTrue);
-    // A key-resolved stop leaves the final render to the registered
-    // dispatcher, so the row is still streaming at this instant.
     expect(container.read(chatMessagesProvider).last.isStreaming, isTrue);
-    // The adapter never sends a terminal event; the send only settles because
-    // the stop cancelled the run.
     await send.timeout(const Duration(seconds: 1));
 
     expect(harness.runRegistry.hasLiveIntent(ownerKey), isFalse);
@@ -5511,12 +5481,6 @@ void main() {
     expect(completed.content, 'Partial answer');
   });
 
-  // `rebind(previous, next)`: a chat-id remap moves the run to a new owner
-  // scope while the visible conversation keeps the pre-remap id, so the key the
-  // stop path derives from the transcript no longer resolves. Only the stop
-  // index still names the live run, by assistant message id. The
-  // `untrack(previous)` half of the rebind is not separately observable from
-  // here: the registry's live-intent filter already rejects the vacated key.
   test('stop cancels a direct run rebound by a chat-id remap', () async {
     final harness = await _createRemappableDirectHarness('stop-index-remap');
     final container = harness.container;
@@ -5569,17 +5533,10 @@ void main() {
     );
     expect(harness.runRegistry.runFor(remappedKey), same(run.run));
     expect(harness.runRegistry.runFor(originalKey), isNull);
-    // The remap does not move the visible conversation, so the stop key
-    // derived from it is the stale pre-remap owner scope.
     expect(container.read(activeConversationProvider)?.id, harness.chat.id);
 
     container.read(stopGenerationProvider)();
-    // The key derived from the visible conversation is vacant, so this
-    // synchronous cancellation can only have come from the stop index's
-    // `keysForMessage(assistantId)` lookup of the rebound key.
     expect(run.run.isCancelled, isTrue);
-    // An identity-resolved stop also completes the visible placeholder itself
-    // instead of leaving the final render to the dispatcher.
     expect(container.read(chatMessagesProvider).last.isStreaming, isFalse);
     await send.timeout(const Duration(seconds: 1));
 
@@ -5590,11 +5547,6 @@ void main() {
     expect(completed.content, 'Partial answer');
   });
 
-  // `untrack`: the dispatch drops its key when the run settles, so a later
-  // stop on a re-shown streaming tail for the same message finds no candidate
-  // and only settles the visible row. Note the registry's live-intent filter
-  // would also reject a leaked entry here, so this pins the observable
-  // contract rather than the index's internal bookkeeping.
   test('stop after a settled direct run cancels nothing', () async {
     final harness = await _createGatedDirectHarness('stop-index-untrack');
     final container = harness.container;
@@ -5616,8 +5568,6 @@ void main() {
     );
     expect(runRegistry.hasLiveIntent(ownerKey), isFalse);
 
-    // Re-show the settled assistant as a streaming tail, the way a restored
-    // checkpoint would, and stop it.
     final visible = container.read(chatMessagesProvider);
     container.read(chatMessagesProvider.notifier).setMessages([
       ...visible.take(visible.length - 1),
