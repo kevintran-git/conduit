@@ -46,8 +46,10 @@ class ReadAloudPanel extends StatelessWidget {
                       ),
                       Expanded(
                         child: Text(
-                          snapshot.retrying
-                              ? 'Retrying…'
+                          snapshot.stalled
+                              ? 'Connection lost'
+                              : snapshot.retrying
+                              ? 'Reconnecting…'
                               : snapshot.buffering
                               ? 'Buffering…'
                               : 'Read aloud',

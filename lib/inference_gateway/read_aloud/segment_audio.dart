@@ -65,6 +65,8 @@ class SegmentJob implements SegmentAudio {
   bool _failed = false;
   bool _complete = false;
   bool _cancelled = false;
+  bool _voiceRejected = false;
+  bool _usedDefaultVoice = false;
   double? _measuredGain;
   int _attempt = 0;
   String? _failureReason;
@@ -81,6 +83,7 @@ class SegmentJob implements SegmentAudio {
   @override
   int get attempt => _attempt;
   String? get failureReason => _failureReason;
+  bool get usedDefaultVoice => _usedDefaultVoice;
   bool get complete => _complete;
   double? get measuredGain => _measuredGain;
   Future<void> get finished => _run ?? Future<void>.value();
@@ -125,12 +128,18 @@ class SegmentJob implements SegmentAudio {
       if (_cancelled) break;
       _attempt = attempt;
       if (attempt > 1) _notify();
-      final outcome = await _runAttempt();
+      var outcome = await _runAttempt(_usedDefaultVoice ? '' : voice);
+      if (_voiceRejected && !_usedDefaultVoice && voice.trim().isNotEmpty) {
+        _usedDefaultVoice = true;
+        outcome = await _runAttempt('');
+      }
       if (outcome == _Outcome.complete) {
         _complete = true;
         break;
       }
-      if (outcome == _Outcome.truncated || _cancelled) break;
+      if (outcome == _Outcome.truncated || _voiceRejected || _cancelled) {
+        break;
+      }
       if (attempt < maxAttempts) {
         await Future<void>.delayed(Duration(milliseconds: 600 * attempt));
       }
@@ -140,7 +149,8 @@ class SegmentJob implements SegmentAudio {
     _notify();
   }
 
-  Future<_Outcome> _runAttempt() async {
+  Future<_Outcome> _runAttempt(String voice) async {
+    _voiceRejected = false;
     final shaper = shaperFactory();
     var received = 0;
     var timedOut = false;
@@ -195,8 +205,9 @@ class SegmentJob implements SegmentAudio {
       _session = null;
       if (_cancelled) return _Outcome.failed;
       if (received == 0) {
+        _voiceRejected = finishedCleanly;
         _failureReason = finishedCleanly
-            ? 'The gateway returned no audio for voice "$voice".'
+            ? 'The gateway returned no audio.'
             : timedOut
             ? 'The gateway sent no audio within '
                   '${firstFrameTimeout.inSeconds} s.'

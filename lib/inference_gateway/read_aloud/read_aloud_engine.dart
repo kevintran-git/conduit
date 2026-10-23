@@ -24,6 +24,7 @@ class ReadAloudSnapshot {
     required this.status,
     required this.buffering,
     required this.retrying,
+    required this.stalled,
     required this.segment,
     required this.word,
     required this.position,
@@ -36,6 +37,7 @@ class ReadAloudSnapshot {
   final ReadAloudStatus status;
   final bool buffering;
   final bool retrying;
+  final bool stalled;
   final int segment;
   final int word;
   final Duration position;
@@ -55,6 +57,16 @@ class ReadAloudFailure implements Exception {
   String toString() => message;
 }
 
+class _Stall implements Exception {
+  const _Stall(this.segment);
+
+  final int segment;
+}
+
+void readAloudTrace(String event, Map<String, Object?> data) {
+  debugPrint('[read-aloud] $event $data');
+}
+
 class ReadAloudEngine {
   ReadAloudEngine({
     required ik.ElevenLabsTtsClient client,
@@ -63,6 +75,7 @@ class ReadAloudEngine {
     ChatTtsBackgroundLease? lease,
     PcmStreamSpeaker? speaker,
     this.maxConcurrentJobs = 3,
+    this.firstAudioDeadline = const Duration(seconds: 15),
   }) : _client = client,
        _store = store ?? ReadAloudStore(),
        _lease = lease ?? ChatTtsBackgroundLease(),
@@ -86,11 +99,13 @@ class ReadAloudEngine {
   final ChatTtsBackgroundLease _lease;
   final PcmStreamSpeaker _speaker;
   final int maxConcurrentJobs;
+  final Duration firstAudioDeadline;
 
   void Function()? onStarted;
   void Function(ReadAloudStatus status)? onStatus;
   void Function()? onCompleted;
-  void Function(String message)? onError;
+  void Function(String message, bool heard)? onError;
+  void Function(String voice)? onVoiceRejected;
   void Function(int part, int start, int end)? onWord;
 
   final ValueNotifier<ReadAloudSnapshot?> snapshot = ValueNotifier(null);
@@ -126,6 +141,10 @@ class ReadAloudEngine {
   int _lastWordSeg = -1;
   int _lastWord = -1;
   String? _lastFailure;
+  bool _stalled = false;
+  Timer? _deadline;
+  Completer<void> _halt = Completer<void>();
+  DateTime? _playStartedAt;
 
   AudioSession? _audioSession;
   bool _audioSessionBound = false;
@@ -183,33 +202,39 @@ class ReadAloudEngine {
     _startedOnce = false;
     _audible = false;
     _lastFailure = null;
+    _stalled = false;
+    _playStartedAt = DateTime.now();
     _lastWordSeg = -1;
     _lastWord = -1;
     _seg = _nextAudible(0, 1) ?? 0;
     _offset = 0;
+    _armDeadline();
     _publish();
 
-    _msPerWeight = await _store.loadRate(_voiceKey) ?? _defaultMsPerWeight;
-    _gain = await _store.loadGain(_voiceKey) ?? 1;
-    await Future.wait([
-      for (var i = 0; i < plan.segments.length; i++)
-        if (!plan.segments[i].silent) _probeCache(session, i),
+    final loads = await Future.wait<Object?>([
+      _store.loadRate(_voiceKey),
+      _store.loadGain(_voiceKey),
+      if (resumeStored) _store.loadMark(_messageKey!) else Future.value(),
     ]);
     if (session != _session) return;
-    if (resumeStored) {
-      final mark = await _store.loadMark(_messageKey!);
-      if (session != _session) return;
-      if (mark != null) _applyMark(mark);
-    }
-    DebugLogger.log(
-      'play',
-      scope: 'gateway/read-aloud',
-      data: {
-        'segments': plan.segments.length,
-        'cached': _cachedBytes.length,
-        'start_segment': _seg,
-      },
-    );
+    _msPerWeight = loads[0] as double? ?? _defaultMsPerWeight;
+    _gain = loads[1] as double? ?? 1;
+    final mark = loads[2] as ReadAloudMark?;
+    await _probeCache(session, _seg);
+    if (session != _session) return;
+    if (mark == null && !_cachedBytes.containsKey(_seg)) _startJob(_seg);
+    await Future.wait([
+      for (var i = 0; i < plan.segments.length; i++)
+        if (!plan.segments[i].silent && i != _seg) _probeCache(session, i),
+    ]);
+    if (session != _session) return;
+    if (mark != null) _applyMark(mark);
+    readAloudTrace('play', {
+      'segments': plan.segments.length,
+      'cached': _cachedBytes.length,
+      'start_segment': _seg,
+      'voice': voice.isEmpty ? 'default' : voice,
+    });
     _pump();
     final gate = _gate = Completer<void>();
     unawaited(_startRun());
@@ -233,6 +258,7 @@ class ReadAloudEngine {
     _seg = pos.segment;
     _offset = pos.offset;
     _paused = true;
+    _cancelDeadline();
     await _haltRun();
     _completeGate();
     onStatus?.call(ReadAloudStatus.paused);
@@ -245,6 +271,7 @@ class ReadAloudEngine {
     if (!_active || !_paused) return;
     _resumeAfterInterruption = false;
     _paused = false;
+    if (_stalled) _clearFailures();
     final gate = _gate = Completer<void>();
     unawaited(_startRun());
     await gate.future;
@@ -304,6 +331,7 @@ class ReadAloudEngine {
   Future<void> stop() async {
     if (!_active) return;
     if (_audible) await _saveMark();
+    _cancelDeadline();
     _active = false;
     _paused = false;
     _session++;
@@ -331,6 +359,7 @@ class ReadAloudEngine {
 
   Future<void> _haltRun() async {
     _runId++;
+    if (!_halt.isCompleted) _halt.complete();
     _waiting = false;
     _stopTicker();
     if (!_running) return;
@@ -340,7 +369,9 @@ class ReadAloudEngine {
 
   Future<void> _jumpTo(int seg, int offset, {bool play = false}) async {
     if (!_active) return;
-    if (_failed.remove(seg)) {
+    if (_stalled) {
+      _clearFailures();
+    } else if (_failed.remove(seg)) {
       final job = _jobs.remove(seg);
       unawaited(job?.cancel());
     }
@@ -366,8 +397,11 @@ class ReadAloudEngine {
       return;
     }
     final runId = ++_runId;
+    _halt = Completer<void>();
     _running = true;
     _paused = false;
+    _stalled = false;
+    if (!_audible) _armDeadline();
     final clock = _clock = PlaybackClock(bytesPerSecond: kTtsBytesPerSecond);
     final startSeg = _seg;
     final startOffset = _offset;
@@ -383,6 +417,14 @@ class ReadAloudEngine {
         onFirstFrame: () {
           if (runId != _runId) return;
           clock.start();
+          _cancelDeadline();
+          if (!_audible) {
+            final started = _playStartedAt;
+            readAloudTrace('first-audio', {
+              if (started != null)
+                'ms': DateTime.now().difference(started).inMilliseconds,
+            });
+          }
           _audible = true;
           onStatus?.call(ReadAloudStatus.playing);
           if (!_startedOnce) {
@@ -409,14 +451,28 @@ class ReadAloudEngine {
     await _speaker.stop(hardFlush: true);
     if (runId != _runId) return;
 
+    if (failure is _Stall && _audible) {
+      _seg = failure.segment;
+      _offset = 0;
+      _paused = true;
+      _stalled = true;
+      readAloudTrace('stalled', {
+        'segment': failure.segment,
+        'reason': _lastFailure ?? '',
+      });
+      _completeGate();
+      onStatus?.call(ReadAloudStatus.paused);
+      _publish();
+      await _saveMark();
+      unawaited(_lease.release());
+      return;
+    }
+
     if (failure != null || !_audible) {
-      final key = _messageKey;
-      await _finish();
-      if (key != null && !_audible) await _store.clearMark(key);
-      onError?.call(
-        failure?.toString() ??
-            'The gateway returned no audio for this message.',
-      );
+      final message = failure is _Stall || failure == null
+          ? _lastFailure ?? 'The gateway returned no audio for this message.'
+          : failure.toString();
+      await _giveUp(message);
       return;
     }
     final key = _messageKey;
@@ -427,7 +483,47 @@ class ReadAloudEngine {
     onCompleted?.call();
   }
 
+  Future<void> _giveUp(String message) async {
+    final heard = _audible;
+    final key = _messageKey;
+    readAloudTrace('failed', {'heard': heard, 'reason': message});
+    await _finish();
+    if (key != null && !heard) await _store.clearMark(key);
+    onError?.call(message, heard);
+  }
+
+  void _armDeadline() {
+    _deadline?.cancel();
+    final session = _session;
+    _deadline = Timer(firstAudioDeadline, () async {
+      if (session != _session || !_active || _audible || _paused) return;
+      await _haltRun();
+      if (session != _session || !_active) return;
+      await _giveUp(
+        _lastFailure ??
+            'The gateway did not respond within '
+                '${firstAudioDeadline.inSeconds} s.',
+      );
+    });
+  }
+
+  void _cancelDeadline() {
+    _deadline?.cancel();
+    _deadline = null;
+  }
+
+  void _clearFailures() {
+    _stalled = false;
+    for (final i in _failed) {
+      final job = _jobs.remove(i);
+      unawaited(job?.cancel());
+    }
+    _failed.clear();
+    _lastFailure = null;
+  }
+
   Future<void> _finish() async {
+    _cancelDeadline();
     _active = false;
     _paused = false;
     _session++;
@@ -445,11 +541,18 @@ class ReadAloudEngine {
   Stream<Uint8List> _feed(int runId, int startSeg, int startOffset) async* {
     final plan = _plan;
     final clock = _clock;
+    final halted = _halt.future;
     if (plan == null || clock == null) return;
     var failStreak = 0;
-    void segmentFailed() {
+    Future<void> segmentFailed(int i) async {
       failStreak++;
-      if (!_audible && failStreak >= 2) {
+      if (_audible) {
+        while (runId == _runId && clock.started && !clock.starved) {
+          await Future<void>.delayed(const Duration(milliseconds: 40));
+        }
+        throw _Stall(i);
+      }
+      if (failStreak >= 2) {
         throw ReadAloudFailure(
           _lastFailure ?? 'The gateway returned no audio for this message.',
         );
@@ -462,7 +565,7 @@ class ReadAloudEngine {
       final audio = await _audioFor(i);
       if (runId != _runId) return;
       if (audio == null) {
-        segmentFailed();
+        await segmentFailed(i);
         continue;
       }
       var offset = i == startSeg ? startOffset : 0;
@@ -480,7 +583,7 @@ class ReadAloudEngine {
         }
         if (audio.done) break;
         _waiting = true;
-        await audio.waitForChange();
+        await Future.any([audio.waitForChange(), halted]);
         _waiting = false;
       }
       if (audio.failed) {
@@ -489,7 +592,7 @@ class ReadAloudEngine {
         }
         _failed.add(i);
         _publish();
-        segmentFailed();
+        await segmentFailed(i);
       } else if (audio.length > 0) {
         failStreak = 0;
       }
@@ -560,6 +663,12 @@ class ReadAloudEngine {
     SegmentJob job,
   ) async {
     final current = session == _session && identical(_jobs[i], job);
+    if (current && job.usedDefaultVoice && !job.failed && _voice.isNotEmpty) {
+      readAloudTrace('voice-fallback', {'voice': _voice});
+      final rejected = _voice;
+      _voice = '';
+      onVoiceRejected?.call(rejected);
+    }
     if (job.failed) {
       if (current) {
         _lastFailure = job.failureReason ?? _lastFailure;
@@ -747,6 +856,7 @@ class ReadAloudEngine {
       buffering: _running && _waiting && starved,
       retrying:
           _running && starved && job != null && !job.done && job.attempt > 1,
+      stalled: _stalled,
       segment: pos.segment,
       word: word,
       position: Duration(milliseconds: _globalMs(pos)),

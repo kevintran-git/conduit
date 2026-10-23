@@ -11,7 +11,7 @@ import 'read_aloud_panel.dart';
 class ReadAloudOverlayHost {
   ReadAloudOverlayHost({required this.service}) {
     service.readAloud.addListener(_sync);
-    service.readAloudError.addListener(_sync);
+    service.readAloudNotice.addListener(_sync);
   }
 
   final GatewayTextToSpeechService service;
@@ -20,7 +20,8 @@ class ReadAloudOverlayHost {
 
   void _sync() {
     final active =
-        service.readAloud.value != null || service.readAloudError.value != null;
+        service.readAloud.value != null ||
+        service.readAloudNotice.value != null;
     if (active && _entry == null) {
       final overlay = NavigationService.navigatorKey.currentState?.overlay;
       if (overlay == null) return;
@@ -37,7 +38,7 @@ class ReadAloudOverlayHost {
 
   void dispose() {
     service.readAloud.removeListener(_sync);
-    service.readAloudError.removeListener(_sync);
+    service.readAloudNotice.removeListener(_sync);
     _entry?.remove();
     _entry = null;
     _expanded.dispose();
@@ -71,26 +72,35 @@ class ReadAloudOverlay extends StatelessWidget {
           top: MediaQuery.paddingOf(context).top + kToolbarHeight + Spacing.sm,
           left: Spacing.md,
           right: Spacing.md,
-          child: ValueListenableBuilder<ReadAloudSnapshot?>(
-            valueListenable: service.readAloud,
-            builder: (context, snapshot, _) {
-              if (snapshot == null) {
-                return ValueListenableBuilder<String?>(
-                  valueListenable: service.readAloudError,
-                  builder: (context, error, _) => error == null
-                      ? const SizedBox.shrink()
-                      : _ErrorBar(
-                          message: error,
-                          onClose: service.dismissReadAloudError,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ValueListenableBuilder<ReadAloudNotice?>(
+                valueListenable: service.readAloudNotice,
+                builder: (context, notice, _) => AnimatedSize(
+                  duration: const Duration(milliseconds: 200),
+                  child: notice == null
+                      ? const SizedBox(width: double.infinity)
+                      : Padding(
+                          padding: const EdgeInsets.only(bottom: Spacing.sm),
+                          child: _NoticeBar(
+                            notice: notice,
+                            onClose: service.dismissReadAloudNotice,
+                          ),
                         ),
-                );
-              }
-              return _MiniBar(
-                snapshot: snapshot,
-                service: service,
-                onExpand: () => expanded.value = true,
-              );
-            },
+                ),
+              ),
+              ValueListenableBuilder<ReadAloudSnapshot?>(
+                valueListenable: service.readAloud,
+                builder: (context, snapshot, _) => snapshot == null
+                    ? const SizedBox.shrink()
+                    : _MiniBar(
+                        snapshot: snapshot,
+                        service: service,
+                        onExpand: () => expanded.value = true,
+                      ),
+              ),
+            ],
           ),
         );
       },
@@ -138,13 +148,13 @@ class _MiniBar extends StatelessWidget {
                   ReadAloudPlayButton(snapshot: snapshot, service: service),
                   Expanded(
                     child: Text(
-                      snapshot.retrying ? 'Retrying…' : sentence,
+                      readAloudStatusLine(snapshot) ?? sentence,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: snapshot.retrying
-                            ? theme.textSecondary
-                            : theme.textPrimary,
+                        color: readAloudStatusLine(snapshot) == null
+                            ? theme.textPrimary
+                            : theme.textSecondary,
                       ),
                     ),
                   ),
@@ -174,10 +184,19 @@ class _MiniBar extends StatelessWidget {
   }
 }
 
-class _ErrorBar extends StatelessWidget {
-  const _ErrorBar({required this.message, required this.onClose});
+String? readAloudStatusLine(ReadAloudSnapshot snapshot) {
+  if (snapshot.stalled) return 'Connection lost. Tap play to retry.';
+  if (snapshot.retrying) return 'Reconnecting…';
+  if (snapshot.status == ReadAloudStatus.loading && !snapshot.isPaused) {
+    return 'Preparing audio…';
+  }
+  return null;
+}
 
-  final String message;
+class _NoticeBar extends StatelessWidget {
+  const _NoticeBar({required this.notice, required this.onClose});
+
+  final ReadAloudNotice notice;
   final VoidCallback onClose;
 
   @override
@@ -192,11 +211,15 @@ class _ErrorBar extends StatelessWidget {
         padding: const EdgeInsets.only(left: Spacing.md, right: Spacing.xs),
         child: Row(
           children: [
-            Icon(Icons.error_outline, color: theme.error, size: IconSize.lg),
+            Icon(
+              notice.error ? Icons.error_outline : Icons.info_outline,
+              color: notice.error ? theme.error : theme.iconSecondary,
+              size: IconSize.lg,
+            ),
             const SizedBox(width: Spacing.sm),
             Expanded(
               child: Text(
-                'Read aloud failed. $message',
+                notice.message,
                 maxLines: 3,
                 overflow: TextOverflow.ellipsis,
                 style: Theme.of(context).textTheme.bodyMedium
