@@ -56,11 +56,11 @@ void main() {
     final activeConfig = GatewayConfig.defaults().copyWith(
       baseUrl: 'https://gateway.test',
       apiKey: 'secret-key',
-      ttsEnabled: true,
     );
 
     final activeCallContainer = ProviderContainer(
       overrides: [
+        gatewayTtsActiveProvider.overrideWithValue(true),
         gatewayConfigProvider.overrideWith(
           () => _FixedGatewayConfigNotifier(activeConfig),
         ),
@@ -78,6 +78,7 @@ void main() {
 
     final idleCallContainer = ProviderContainer(
       overrides: [
+        gatewayTtsActiveProvider.overrideWithValue(true),
         gatewayConfigProvider.overrideWith(
           () => _FixedGatewayConfigNotifier(activeConfig),
         ),
@@ -97,12 +98,12 @@ void main() {
     () async {
       final container = ProviderContainer(
         overrides: [
+          gatewayTtsActiveProvider.overrideWithValue(true),
           gatewayConfigProvider.overrideWith(
             () => _FixedGatewayConfigNotifier(
               GatewayConfig.defaults().copyWith(
                 baseUrl: 'https://gateway.test',
                 apiKey: 'secret-key',
-                ttsEnabled: true,
               ),
             ),
           ),

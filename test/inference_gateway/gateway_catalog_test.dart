@@ -63,49 +63,40 @@ class _CatalogAdapter implements HttpClientAdapter {
 }
 
 void main() {
-  testWidgets(
-    'TTS model picker uses catalog id while STT model picker uses backend',
-    (tester) async {
-      final config = GatewayConfig.defaults().copyWith(
-        baseUrl: 'https://gateway.test',
-        apiKey: 'secret-key',
-      );
+  testWidgets('TTS model picker lists catalog model ids', (tester) async {
+    final config = GatewayConfig.defaults().copyWith(
+      baseUrl: 'https://gateway.test',
+      apiKey: 'secret-key',
+    );
 
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [
-            gatewayConfigProvider.overrideWith(
-              () => _FixedGatewayConfigNotifier(config),
-            ),
-            gatewayClientProvider.overrideWith((ref) {
-              final client = GatewayClient(ref: ref);
-              client.dio.httpClientAdapter = _CatalogAdapter();
-              return client;
-            }),
-          ],
-          child: MaterialApp(
-            theme: AppTheme.light(TweakcnThemes.t3Chat),
-            home: const Scaffold(
-              body: Column(
-                children: [GatewayTtsOptions(), GatewaySttModelField()],
-              ),
-            ),
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          gatewayConfigProvider.overrideWith(
+            () => _FixedGatewayConfigNotifier(config),
           ),
+          gatewayClientProvider.overrideWith((ref) {
+            final client = GatewayClient(ref: ref);
+            client.dio.httpClientAdapter = _CatalogAdapter();
+            return client;
+          }),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.light(TweakcnThemes.t3Chat),
+          home: const Scaffold(body: Column(children: [GatewayTtsOptions()])),
         ),
-      );
-      await tester.pumpAndSettle();
+      ),
+    );
+    await tester.pumpAndSettle();
 
-      final dropdowns = tester
-          .widgetList<AdaptiveDropdownField<String>>(
-            find.byType(AdaptiveDropdownField<String>),
-          )
-          .toList();
+    final dropdowns = tester
+        .widgetList<AdaptiveDropdownField<String>>(
+          find.byType(AdaptiveDropdownField<String>),
+        )
+        .toList();
 
-      final ttsModelValues = dropdowns[0].options.map((o) => o.value).toList();
-      final sttModelValues = dropdowns[2].options.map((o) => o.value).toList();
+    final ttsModelValues = dropdowns[0].options.map((o) => o.value).toList();
 
-      check(ttsModelValues).deepEquals(<String>['', 'eleven_v3']);
-      check(sttModelValues).deepEquals(<String>['', 'google_chirp3']);
-    },
-  );
+    check(ttsModelValues).deepEquals(<String>['', 'eleven_v3']);
+  });
 }

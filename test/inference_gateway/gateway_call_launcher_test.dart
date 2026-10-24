@@ -7,6 +7,7 @@ import 'package:conduit/inference_gateway/voice_call/presentation/gateway_call_l
 import 'package:conduit/inference_gateway/voice_call/presentation/gateway_call_overlay.dart';
 import 'package:conduit/shared/services/navigation_service.dart';
 import 'package:conduit_core/features/auth/providers/unified_auth_providers.dart';
+import 'package:conduit_core/features/chat/realtime_call/realtime_call_availability.dart';
 import 'package:conduit_core/models/model.dart';
 import 'package:conduit_core/providers/app_providers.dart';
 import 'package:flutter/material.dart';
@@ -54,7 +55,6 @@ void main() {
       final config = GatewayConfig.defaults().copyWith(
         baseUrl: 'https://gateway.test',
         apiKey: 'secret-key',
-        voiceEnabled: true,
       );
 
       final container = ProviderContainer(
@@ -69,6 +69,13 @@ void main() {
             const Model(id: 'gpt-test', name: 'GPT Test'),
           ),
           callSessionProvider.overrideWith(_IdleCallSession.new),
+          realtimeCallRouteResolverProvider.overrideWithValue(
+            (model, {newChat = false}) async => (
+              bridge: null,
+              hermes: null,
+              block: RealtimeCallBlock.standardChosen,
+            ),
+          ),
         ],
       );
       addTearDown(container.dispose);
@@ -88,6 +95,7 @@ void main() {
       final launchFuture = container
           .read(_launcherTestProvider)
           .launch(startNewConversation: false);
+      await tester.pump();
       await tester.pump();
 
       check(find.byType(GatewayCallOverlay).evaluate()).isNotEmpty();

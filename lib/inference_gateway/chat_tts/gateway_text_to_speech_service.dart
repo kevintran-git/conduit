@@ -23,6 +23,7 @@ import '../router/gateway_router_providers.dart';
 import '../read_aloud/presentation/read_aloud_overlay.dart';
 import '../read_aloud/device_read_aloud.dart';
 import '../read_aloud/read_aloud_adapters.dart';
+import '../read_aloud/read_aloud_settings_provider.dart';
 import '../read_aloud/read_aloud_store.dart';
 import 'gateway_chat_tts_speaker.dart';
 
@@ -59,6 +60,7 @@ class GatewayTextToSpeechService extends TextToSpeechService {
   final ValueNotifier<ReadAloudSnapshot?> readAloud = ValueNotifier(null);
   final ValueNotifier<ReadAloudNotice?> readAloudNotice = ValueNotifier(null);
   Timer? _noticeTimer;
+  Timer? _settingsRestart;
   String? _lastText;
   bool _onDevice = false;
   Future<bool> Function()? _initDevice;
@@ -120,6 +122,7 @@ class GatewayTextToSpeechService extends TextToSpeechService {
       host: host,
     );
     host.engine = engine;
+    engine.settings = _ref.read(readAloudSettingsProvider);
     engine.onStarted = () => _onStart?.call();
     engine.onStatus = _handleReadAloudStatus;
     engine.onCompleted = () {
@@ -166,6 +169,28 @@ class GatewayTextToSpeechService extends TextToSpeechService {
     return _engine = engine;
   }
 
+  void _applySettings(ReadAloudSettings next) {
+    final engine = _engine;
+    if (engine == null) return;
+    final restart = engine.settings.synthesisDiffers(next);
+    engine.settings = next;
+    if (restart) _restartReading(const Duration(milliseconds: 800));
+  }
+
+  void _restartReading(Duration delay) {
+    final engine = _engine;
+    if (engine == null || !engine.isActive) return;
+    _settingsRestart?.cancel();
+    _settingsRestart = Timer(delay, () {
+      final text = _lastText;
+      final segment = engine.snapshot.value?.segment;
+      if (!identical(_engine, engine) || !engine.isActive) return;
+      if (text == null || segment == null || _device != null) return;
+      readAloudTrace('restart', {});
+      unawaited(_speakGateway(text, startSegment: segment));
+    });
+  }
+
   void _showNotice(ReadAloudNotice notice) {
     _noticeTimer?.cancel();
     readAloudNotice.value = notice;
@@ -205,13 +230,15 @@ class GatewayTextToSpeechService extends TextToSpeechService {
         return;
       }
       final config = _ref.read(gatewayConfigProvider);
+      final settings = _ref.read(readAloudSettingsProvider);
       final missingHost = await _unresolvableHost(config.baseUrl);
       if (!_onDevice) return;
       final device = _device = DeviceReadAloud(
         plan: ReadAloudPlan.build(
           fullText: text,
           parts: splitTextForSpeech(text),
-          pronunciations: parsePronunciations(config.ttsPronunciations),
+          pronunciations: parsePronunciations(settings.pronunciations),
+          skip: settings.skip,
         ),
         speak: (value) async {
           _deviceRestartAt = DateTime.now();
@@ -444,12 +471,12 @@ class GatewayTextToSpeechService extends TextToSpeechService {
     _overlay ??= ReadAloudOverlayHost(service: this);
     unawaited(WakelockPlus.enable());
     final engine = await _ensureEngine();
+    engine.settings = _ref.read(readAloudSettingsProvider);
     await engine.play(
       text: text,
       parts: splitTextForSpeech(text),
       voice: config.ttsVoice,
       model: config.ttsModel,
-      pronunciations: parsePronunciations(config.ttsPronunciations),
       startSegment: startSegment,
     );
     if (!engine.isActive) _releaseWakelockIfIdle();
@@ -592,16 +619,6 @@ class GatewayTextToSpeechService extends TextToSpeechService {
 
   Future<void> switchReadAloudVoice(String voice) async {
     await _ref.read(gatewayConfigProvider.notifier).setTtsVoice(voice);
-    final engine = _engine;
-    final text = _lastText;
-    final segment = engine?.snapshot.value?.segment;
-    if (engine == null || !engine.isActive || text == null || segment == null) {
-      return;
-    }
-    readAloudTrace('voice-switch', {
-      'voice': voice.isEmpty ? 'default' : voice,
-    });
-    await _speakGateway(text, startSegment: segment);
   }
 
   Future<void> setReadAloudSpeed(double speed) async {
@@ -618,14 +635,22 @@ class GatewayTextToSpeechService extends TextToSpeechService {
   @override
   Future<List<Map<String, dynamic>>> getAvailableVoices() async {
     if (!_gatewayActive) return super.getAvailableVoices();
-    final cfg = _ref.read(gatewayConfigProvider);
-    return [
-      {'name': cfg.ttsVoice, 'identifier': cfg.ttsVoice, 'locale': 'en-US'},
-    ];
+    try {
+      return [
+        for (final voice in await readAloudVoices())
+          {'id': voice, 'name': voice},
+      ];
+    } catch (_) {
+      final current = _ref.read(gatewayConfigProvider).ttsVoice;
+      return [
+        if (current.isNotEmpty) {'id': current, 'name': current},
+      ];
+    }
   }
 
   @override
   Future<void> dispose() async {
+    _settingsRestart?.cancel();
     _overlay?.dispose();
     _overlay = null;
     await _speaker?.dispose();
@@ -660,6 +685,13 @@ TextToSpeechService createGatewayTextToSpeechService(Ref ref) {
   ref.listen(serverSpeechProviderProvider, (_, next) {
     TtsManager.instance.setServerSpeech(next);
   });
+  ref.listen(readAloudSettingsProvider, (_, next) {
+    service._applySettings(next);
+  });
+  ref.listen(
+    gatewayConfigProvider.select((c) => (c.ttsVoice, c.ttsModel)),
+    (_, _) => service._restartReading(Duration.zero),
+  );
   ref.listen(backendConfigProvider, (_, next) {
     service.setBackendConfig(
       next.maybeWhen(data: (value) => value, orElse: () => null),

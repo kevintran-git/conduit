@@ -3,7 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:conduit_core/features/chat/realtime_call/realtime_call_availability.dart';
 import 'package:conduit_core/providers/app_providers.dart';
+import 'package:conduit_core/services/settings_service.dart';
 
 import '../../../shared/services/navigation_service.dart';
 
@@ -14,7 +16,26 @@ import '../../config/gateway_providers.dart';
 import '../application/call_session.dart';
 import 'gateway_call_overlay.dart';
 
-///
+Future<bool> gatewayRealtimeAvailable(Ref ref, {bool newChat = false}) async {
+  try {
+    final model = ref.read(selectedModelProvider);
+    if (model == null) return false;
+    final route = await ref.read(realtimeCallRouteResolverProvider)(
+      model,
+      newChat: newChat,
+    );
+    return route.block == null;
+  } catch (_) {
+    return false;
+  }
+}
+
+final gatewayCallsUseRealtimeProvider = FutureProvider.autoDispose<bool>((ref) {
+  ref.watch(appSettingsProvider.select((s) => s.voiceCallMode));
+  ref.watch(selectedModelProvider);
+  return gatewayRealtimeAvailable(ref);
+});
+
 class GatewayCallLauncher extends VoiceCallLauncher {
   GatewayCallLauncher(this._ref) : super(_ref);
 
@@ -29,8 +50,8 @@ class GatewayCallLauncher extends VoiceCallLauncher {
       throw StateError('Sign in to start a voice call.');
     }
     final cfg = _ref.read(gatewayConfigProvider);
-    final gatewayUsable = cfg.hasCredentials && cfg.voiceEnabled;
-    if (!gatewayUsable) {
+    if (!cfg.hasCredentials ||
+        await gatewayRealtimeAvailable(_ref, newChat: startNewConversation)) {
       return super.launch(startNewConversation: startNewConversation);
     }
     if (_ref.read(selectedModelProvider) == null) {

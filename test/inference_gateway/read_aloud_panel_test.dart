@@ -144,4 +144,39 @@ void main() {
     service.readAloud.value = null;
     await tester.pump();
   });
+
+  testWidgets('skipped citations stay on screen, dimmed', (tester) async {
+    const text = 'See the guide [2]. Then stop.';
+    final plan = ReadAloudPlan.build(
+      fullText: text,
+      parts: const ['See the guide [2].', 'Then stop.'],
+      skip: const {InlineSkipKind.citation},
+    );
+    final service = await _pumpPanel(tester);
+
+    service.readAloud.value = _snapshot(plan, segment: 1);
+    await tester.pump();
+    final spans = (_paragraphs(tester).values.single.text as TextSpan).children!
+        .cast<TextSpan>();
+    final skipped = spans.singleWhere((span) => span.text == '[2].');
+    final plain = spans.firstWhere((span) => span.text!.startsWith('See'));
+    expect(skipped.style?.color, isNot(plain.style?.color));
+
+    service.readAloud.value = null;
+    await tester.pump();
+  });
+
+  testWidgets('the settings chip opens read-aloud settings', (tester) async {
+    final service = await _pumpPanel(tester);
+
+    service.readAloud.value = _snapshot(_plan(2, 2), segment: 0);
+    await tester.pump();
+    await tester.tap(find.text('Settings'));
+    await tester.pumpAndSettle();
+    expect(find.text('Skip while reading'), findsOneWidget);
+    expect(find.text('Citations'), findsOneWidget);
+
+    service.readAloud.value = null;
+    await tester.pump();
+  });
 }

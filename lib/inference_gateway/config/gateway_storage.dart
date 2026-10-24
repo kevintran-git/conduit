@@ -9,13 +9,9 @@ class GatewayStorage {
     : _secureStorage = secureStorage ?? const FlutterSecureStorage();
 
   static const String _kBaseUrl = 'gateway.base_url';
-  static const String _kSttEnabled = 'gateway.stt_enabled';
-  static const String _kTtsEnabled = 'gateway.tts_enabled';
-  static const String _kVoiceEnabled = 'gateway.voice_enabled';
-  static const String _kSttModel = 'gateway.stt_model';
   static const String _kTtsModel = 'gateway.tts_model';
-  static const String _kTtsVoice = 'gateway.tts_voice';
-  static const String _kTtsPronunciations = 'gateway.tts_pronunciations';
+  static const String _kLegacyTtsVoice = 'gateway.tts_voice';
+  static const String _kLegacyPronunciations = 'gateway.tts_pronunciations';
   static const String _kVoiceManualMode = 'gateway.voice_manual_mode';
   static const String _kApiKey = 'inference_gateway_api_key';
 
@@ -26,19 +22,26 @@ class GatewayStorage {
   Future<void> _write(String key, Object? value) =>
       PreferencesStore.put(key, value);
 
-  GatewayConfig loadSync({required String apiKey}) {
+  GatewayConfig loadSync({required String apiKey, String voice = ''}) {
     return GatewayConfig(
       baseUrl: _read<String>(_kBaseUrl) ?? GatewayConfig.defaultBaseUrl,
       apiKey: apiKey,
-      sttEnabled: _read<bool>(_kSttEnabled) ?? false,
-      ttsEnabled: _read<bool>(_kTtsEnabled) ?? false,
-      voiceEnabled: _read<bool>(_kVoiceEnabled) ?? false,
-      sttModel: _read<String>(_kSttModel) ?? '',
       ttsModel: _read<String>(_kTtsModel) ?? GatewayConfig.unsetModel,
-      ttsVoice: _read<String>(_kTtsVoice) ?? GatewayConfig.unsetModel,
-      ttsPronunciations: _read<String>(_kTtsPronunciations) ?? '',
+      ttsVoice: voice,
       voiceManualMode: _read<bool>(_kVoiceManualMode) ?? false,
     );
+  }
+
+  String takeLegacyVoice() {
+    final voice = _read<String>(_kLegacyTtsVoice) ?? '';
+    if (voice.isNotEmpty) PreferencesStore.put(_kLegacyTtsVoice, null);
+    return voice;
+  }
+
+  String takeLegacyPronunciations() {
+    final value = _read<String>(_kLegacyPronunciations) ?? '';
+    if (value.isNotEmpty) PreferencesStore.put(_kLegacyPronunciations, null);
+    return value;
   }
 
   Future<String> loadApiKey() async {
@@ -56,14 +59,7 @@ class GatewayStorage {
   }
 
   Future<void> saveBaseUrl(String value) => _write(_kBaseUrl, value);
-  Future<void> saveSttEnabled(bool value) => _write(_kSttEnabled, value);
-  Future<void> saveTtsEnabled(bool value) => _write(_kTtsEnabled, value);
-  Future<void> saveVoiceEnabled(bool value) => _write(_kVoiceEnabled, value);
-  Future<void> saveSttModel(String value) => _write(_kSttModel, value);
   Future<void> saveTtsModel(String value) => _write(_kTtsModel, value);
-  Future<void> saveTtsVoice(String value) => _write(_kTtsVoice, value);
-  Future<void> saveTtsPronunciations(String value) =>
-      _write(_kTtsPronunciations, value);
   Future<void> saveVoiceManualMode(bool value) =>
       _write(_kVoiceManualMode, value);
 

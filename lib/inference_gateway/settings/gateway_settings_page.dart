@@ -1,4 +1,3 @@
-import 'package:conduit/shared/widgets/platform_ui/platform_ui.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,10 +5,6 @@ import 'package:go_router/go_router.dart';
 
 import '../../shared/services/navigation_service.dart';
 
-import 'package:conduit_core/services/settings_service.dart';
-
-import '../../features/profile/widgets/adaptive_segmented_selector.dart';
-import '../../features/profile/widgets/customization_tile.dart';
 import '../../features/profile/widgets/expandable_card.dart';
 import '../../features/profile/widgets/profile_setting_tile.dart';
 import '../../features/profile/widgets/settings_page_scaffold.dart';
@@ -19,16 +14,8 @@ import '../../shared/widgets/conduit_components.dart';
 import '../../shared/widgets/utility_components.dart';
 import '../config/gateway_config.dart';
 import '../config/gateway_providers.dart';
-import 'gateway_model_pickers.dart';
-
-enum _CallMode { conduit, pipeline }
-
-typedef _Gate = ({bool inactive, String? reason});
-
-const _Gate _active = (inactive: false, reason: null);
-const _Gate _silentGate = (inactive: true, reason: null);
-
-_Gate _reasonGate(String reason) => (inactive: true, reason: reason);
+import '../read_aloud/presentation/read_aloud_settings_view.dart';
+import '../voice_call/presentation/gateway_call_launcher.dart';
 
 class GatewaySettingsPage extends ConsumerStatefulWidget {
   const GatewaySettingsPage({super.key});
@@ -66,64 +53,6 @@ class _GatewaySettingsPageState extends ConsumerState<GatewaySettingsPage> {
 
   static const String _addKeyReason = 'Add key above to activate.';
 
-  _Gate _credentialsGate(GatewayConfig cfg) =>
-      cfg.hasCredentials ? _active : _silentGate;
-
-  _Gate _sttGate(GatewayConfig cfg, AppSettings settings) {
-    final base = _credentialsGate(cfg);
-    if (base.inactive) return base;
-    if (settings.sttPreference != SttPreference.serverOnly) {
-      return _reasonGate('Audio input is set to on-device.');
-    }
-    return _active;
-  }
-
-  _Gate _ttsToggleGate(GatewayConfig cfg, AppSettings settings) {
-    final base = _credentialsGate(cfg);
-    if (base.inactive) return base;
-    if (settings.ttsEngine != TtsEngine.server) {
-      return _reasonGate('Audio output is set to on-device.');
-    }
-    return _active;
-  }
-
-  _Gate _voiceGate(GatewayConfig cfg) => _credentialsGate(cfg);
-
-  _CallMode _callModeOf(GatewayConfig cfg) {
-    if (cfg.voiceEnabled) return _CallMode.pipeline;
-    return _CallMode.conduit;
-  }
-
-  Future<void> _setCallMode(
-    GatewayConfigNotifier notifier,
-    _CallMode mode,
-  ) async {
-    switch (mode) {
-      case _CallMode.conduit:
-        await notifier.setVoiceEnabled(false);
-      case _CallMode.pipeline:
-        await notifier.setVoiceEnabled(true);
-    }
-  }
-
-  String _callModeDescription(_CallMode mode) {
-    switch (mode) {
-      case _CallMode.conduit:
-        return 'Open WebUI call.';
-      case _CallMode.pipeline:
-        return 'Gateway STT, chat, TTS — turn by turn.';
-    }
-  }
-
-  _Gate _ttsDefaultsGate(GatewayConfig cfg, AppSettings settings) {
-    final base = _ttsToggleGate(cfg, settings);
-    if (base.inactive) return base;
-    if (!cfg.ttsEnabled) {
-      return _reasonGate('Enable Text-to-speech above.');
-    }
-    return _active;
-  }
-
   @override
   Widget build(BuildContext context) {
     ref.listen<GatewayConfig>(gatewayConfigProvider, (previous, next) {
@@ -131,112 +60,68 @@ class _GatewaySettingsPageState extends ConsumerState<GatewaySettingsPage> {
       _hydrateIfEmpty(_keyController, next.apiKey);
     });
     final cfg = ref.watch(gatewayConfigProvider);
-    final settings = ref.watch(appSettingsProvider);
     final theme = context.conduitTheme;
     final notifier = ref.read(gatewayConfigProvider.notifier);
 
     return UtilityPageScaffold.settings(
       title: 'Inference Gateway',
       children: [
-        _buildIntro(context),
-        settingsSectionGap,
         _buildEndpointSection(context, cfg, notifier, theme),
-        settingsSectionGap,
-        SettingsSectionHeader(title: 'Gateway features'),
-        const SizedBox(height: Spacing.sm),
-        _buildToggleTile(
-          context: context,
-          icon: Icons.mic_none,
-          title: 'Speech-to-text',
-          subtitle: 'Transcribe your mic input.',
-          value: cfg.sttEnabled,
-          onChanged: notifier.setSttEnabled,
-          gate: _sttGate(cfg, settings),
-          onInactiveAction: () => context.pushNamed(RouteNames.audioSettings),
-          inactiveActionLabel: 'Audio settings',
-        ),
-        if (cfg.sttEnabled) ...[
+        if (cfg.hasCredentials) ...[
+          settingsSectionGap,
+          SettingsSectionHeader(title: 'Routing'),
           const SizedBox(height: Spacing.sm),
-          _wrapInactive(
-            context,
-            ConduitCard(
-              child: const Padding(
-                padding: EdgeInsets.all(Spacing.md),
-                child: GatewaySttModelField(),
-              ),
+          _buildRouting(context, cfg),
+          settingsSectionGap,
+          SettingsSectionHeader(title: 'Read aloud'),
+          const SizedBox(height: Spacing.sm),
+          ConduitCard(
+            child: const Padding(
+              padding: EdgeInsets.all(Spacing.md),
+              child: ReadAloudSettingsView(),
             ),
-            _sttGate(cfg, settings),
           ),
         ],
-        const SizedBox(height: Spacing.sm),
-        _buildToggleTile(
-          context: context,
-          icon: Icons.volume_up_outlined,
-          title: 'Text-to-speech',
-          subtitle: 'Read replies aloud.',
-          value: cfg.ttsEnabled,
-          onChanged: notifier.setTtsEnabled,
-          gate: _ttsToggleGate(cfg, settings),
-          onInactiveAction: () => context.pushNamed(RouteNames.audioSettings),
-          inactiveActionLabel: 'Audio settings',
-        ),
-        const SizedBox(height: Spacing.sm),
-        _wrapInactive(
-          context,
-          ExpandableCard(
-            title: 'Voice options',
-            subtitle: '${cfg.ttsModel} · ${cfg.ttsVoice}',
-            icon: Icons.record_voice_over_outlined,
-            child: const GatewayTtsOptions(),
-          ),
-          _ttsDefaultsGate(cfg, settings),
-        ),
-        settingsSectionGap,
-        SettingsSectionHeader(title: 'Voice call'),
-        const SizedBox(height: Spacing.sm),
-        _wrapInactive(
-          context,
-          ConduitCard(
-            child: Padding(
-              padding: const EdgeInsets.all(Spacing.md),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  AdaptiveSegmentedSelector<_CallMode>(
-                    value: _callModeOf(cfg),
-                    onChanged: (mode) => _setCallMode(notifier, mode),
-                    showIcons: false,
-                    options: const [
-                      (
-                        value: _CallMode.conduit,
-                        label: 'Conduit',
-                        cupertinoIcon: CupertinoIcons.app,
-                        materialIcon: Icons.apps,
-                        enabled: true,
-                      ),
-                      (
-                        value: _CallMode.pipeline,
-                        label: 'Pipeline',
-                        cupertinoIcon: CupertinoIcons.phone,
-                        materialIcon: Icons.call,
-                        enabled: true,
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: Spacing.xs),
-                  Text(
-                    _callModeDescription(_callModeOf(cfg)),
-                    style: theme.bodySmall?.copyWith(
-                      color: theme.sidebarForeground.withValues(alpha: 0.75),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          _voiceGate(cfg),
-        ),
       ],
+    );
+  }
+
+  Widget _buildRouting(BuildContext context, GatewayConfig cfg) {
+    final tts = ref.watch(gatewayTtsActiveProvider);
+    final stt = ref.watch(gatewaySttActiveProvider);
+    final realtime = ref.watch(gatewayCallsUseRealtimeProvider).asData?.value;
+    void openAudio() => context.pushNamed(RouteNames.audioSettings);
+    final voice = cfg.ttsVoice.isEmpty ? 'default voice' : cfg.ttsVoice;
+    return ConduitCard(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: Spacing.xs),
+        child: Column(
+          children: [
+            _RouteRow(
+              icon: Icons.volume_up_outlined,
+              title: 'Read aloud and replies',
+              value: tts ? 'Gateway, $voice' : 'Device voice',
+              onTap: openAudio,
+            ),
+            _RouteRow(
+              icon: Icons.mic_none,
+              title: 'Dictation',
+              value: stt ? 'Gateway transcription' : 'On-device',
+              onTap: openAudio,
+            ),
+            _RouteRow(
+              icon: Icons.call_outlined,
+              title: 'Calls',
+              value: switch (realtime) {
+                null => 'Checking…',
+                true => 'Open WebUI live voice',
+                false => 'Gateway, turn by turn',
+              },
+              onTap: openAudio,
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -334,151 +219,62 @@ class _GatewaySettingsPageState extends ConsumerState<GatewaySettingsPage> {
       ],
     );
   }
-
-  Widget _buildIntro(BuildContext context) {
-    final cfg = ref.watch(gatewayConfigProvider);
-    return ConduitCard(
-      child: Padding(
-        padding: const EdgeInsets.all(Spacing.md),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _StatusLine(
-              label: 'Credentials',
-              value: cfg.hasCredentials ? 'OK' : 'Missing API key',
-              ok: cfg.hasCredentials,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _wrapInactive(BuildContext context, Widget child, _Gate gate) {
-    if (!gate.inactive) return child;
-    final theme = context.conduitTheme;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Opacity(opacity: 0.5, child: IgnorePointer(child: child)),
-        if (gate.reason != null)
-          Padding(
-            padding: const EdgeInsets.only(top: Spacing.xs),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(
-                  Icons.info_outline,
-                  size: IconSize.small,
-                  color: theme.textSecondary,
-                ),
-                const SizedBox(width: Spacing.xs),
-                Expanded(
-                  child: Text(
-                    gate.reason!,
-                    style: theme.bodySmall?.copyWith(
-                      color: theme.textSecondary,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-      ],
-    );
-  }
-
-  Widget _buildToggleTile({
-    required BuildContext context,
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required bool value,
-    required Future<void> Function(bool) onChanged,
-    _Gate gate = _active,
-    VoidCallback? onInactiveAction,
-    String? inactiveActionLabel,
-  }) {
-    final theme = context.conduitTheme;
-    final tile = CustomizationTile(
-      leading: SettingsIconBadge(icon: icon, color: theme.buttonPrimary),
-      title: title,
-      subtitle: subtitle,
-      trailing: AdaptiveSwitch(value: value, onChanged: onChanged),
-      showChevron: false,
-      onTap: () => onChanged(!value),
-    );
-    if (!gate.inactive) return tile;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Opacity(opacity: 0.5, child: tile),
-        if (gate.reason != null)
-          Padding(
-            padding: const EdgeInsets.only(left: Spacing.md, top: Spacing.xs),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(
-                  Icons.info_outline,
-                  size: IconSize.small,
-                  color: theme.textSecondary,
-                ),
-                const SizedBox(width: Spacing.xs),
-                Expanded(
-                  child: Text(
-                    gate.reason!,
-                    style: theme.bodySmall?.copyWith(
-                      color: theme.textSecondary,
-                    ),
-                  ),
-                ),
-                if (onInactiveAction != null && inactiveActionLabel != null)
-                  TextButton(
-                    onPressed: onInactiveAction,
-                    child: Text(inactiveActionLabel),
-                  ),
-              ],
-            ),
-          ),
-      ],
-    );
-  }
 }
 
-class _StatusLine extends StatelessWidget {
-  const _StatusLine({
-    required this.label,
+class _RouteRow extends StatelessWidget {
+  const _RouteRow({
+    required this.icon,
+    required this.title,
     required this.value,
-    required this.ok,
+    required this.onTap,
   });
 
-  final String label;
+  final IconData icon;
+  final String title;
   final String value;
-  final bool ok;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final theme = context.conduitTheme;
-    final color = ok ? theme.success : theme.warning;
-    return Padding(
-      padding: const EdgeInsets.only(top: Spacing.xs),
-      child: Row(
-        children: [
-          Icon(
-            ok ? Icons.check_circle : Icons.warning_amber_rounded,
-            size: IconSize.small,
-            color: color,
-          ),
-          const SizedBox(width: Spacing.xs),
-          Text(
-            '$label: ',
-            style: theme.bodySmall?.copyWith(color: theme.textSecondary),
-          ),
-          Expanded(
-            child: Text(value, style: theme.bodySmall?.copyWith(color: color)),
-          ),
-        ],
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: Spacing.md,
+          vertical: Spacing.sm,
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: IconSize.medium, color: theme.iconSecondary),
+            const SizedBox(width: Spacing.sm),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: theme.bodyMedium?.copyWith(color: theme.textPrimary),
+                  ),
+                  Text(
+                    value,
+                    style: theme.bodySmall?.copyWith(
+                      color: theme.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              UiUtils.platformIcon(
+                ios: CupertinoIcons.chevron_right,
+                android: Icons.chevron_right,
+              ),
+              size: IconSize.small,
+              color: theme.iconSecondary,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -519,7 +315,7 @@ Widget gatewayProfileTile(BuildContext context) {
       ),
     ),
     title: 'Inference Gateway',
-    subtitle: 'Route STT, chat, and TTS to your own endpoint',
+    subtitle: 'Read aloud, voices and calls through your endpoint',
     trailing: Icon(
       UiUtils.platformIcon(
         ios: CupertinoIcons.chevron_right,

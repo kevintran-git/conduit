@@ -1,16 +1,19 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
 import '../../../shared/theme/theme_extensions.dart';
 import '../../chat_tts/gateway_text_to_speech_service.dart';
-import 'package:inference_kit/read_aloud.dart';
-import 'read_aloud_overlay.dart';
 
-const List<double> readAloudSpeeds = [0.75, 1, 1.25, 1.5, 1.75, 2];
+import 'package:inference_kit/read_aloud.dart';
+
+import '../read_aloud_settings_provider.dart';
+import 'read_aloud_overlay.dart';
+import 'read_aloud_settings_view.dart';
 
 String formatReadAloudSpeed(double speed) {
   final text = speed == speed.roundToDouble()
@@ -19,7 +22,7 @@ String formatReadAloudSpeed(double speed) {
   return '$text×';
 }
 
-enum _Sheet { none, speed, voices }
+enum _Sheet { none, speed, voices, settings }
 
 const double _paragraphGapWeight = 60;
 const int _maxRevealAttempts = 4;
@@ -131,7 +134,27 @@ class _ReadAloudPanelState extends State<ReadAloudPanel> {
                             service: service,
                             onDone: () => setState(() => _sheet = _Sheet.none),
                           )
-                        : _ReadAloudText(snapshot: snapshot, service: service),
+                        : _sheet == _Sheet.settings
+                        ? ListView(
+                            key: const ValueKey('settings'),
+                            padding: const EdgeInsets.all(Spacing.lg),
+                            children: [
+                              ReadAloudSettingsView(showVoice: snapshot.device),
+                            ],
+                          )
+                        : Consumer(
+                            builder: (context, ref, _) {
+                              final settings = ref.watch(
+                                readAloudSettingsProvider,
+                              );
+                              return _ReadAloudText(
+                                snapshot: snapshot,
+                                service: service,
+                                highlightWords: settings.highlightWords,
+                                followVoice: settings.followVoice,
+                              );
+                            },
+                          ),
                   ),
                 ),
                 _Scrubber(snapshot: snapshot, service: service),
@@ -142,10 +165,8 @@ class _ReadAloudPanelState extends State<ReadAloudPanel> {
                     child: _sheet == _Sheet.speed
                         ? _SpeedChoices(
                             speed: snapshot.speed,
-                            onPick: (speed) {
-                              setState(() => _sheet = _Sheet.none);
-                              unawaited(service.setReadAloudSpeed(speed));
-                            },
+                            onChanged: (speed) =>
+                                unawaited(service.setReadAloudSpeed(speed)),
                           )
                         : const SizedBox(width: double.infinity),
                   ),
@@ -155,6 +176,15 @@ class _ReadAloudPanelState extends State<ReadAloudPanel> {
                     sheet: _sheet,
                     onSpeed: () => _toggle(_Sheet.speed),
                     onVoice: () => _toggle(_Sheet.voices),
+                    onSettings: () => _toggle(_Sheet.settings),
+                  ),
+                ] else ...[
+                  _OptionChip(
+                    icon: Icons.tune,
+                    label: 'Settings',
+                    selected: _sheet == _Sheet.settings,
+                    tooltip: 'Read-aloud settings',
+                    onTap: () => _toggle(_Sheet.settings),
                   ),
                 ],
                 const SizedBox(height: Spacing.sm),
@@ -177,10 +207,17 @@ class _Paragraph {
 }
 
 class _ReadAloudText extends StatefulWidget {
-  const _ReadAloudText({required this.snapshot, required this.service});
+  const _ReadAloudText({
+    required this.snapshot,
+    required this.service,
+    required this.highlightWords,
+    required this.followVoice,
+  });
 
   final ReadAloudSnapshot snapshot;
   final GatewayTextToSpeechService service;
+  final bool highlightWords;
+  final bool followVoice;
 
   @override
   State<_ReadAloudText> createState() => _ReadAloudTextState();
@@ -198,7 +235,7 @@ class _ReadAloudTextState extends State<_ReadAloudText> {
   List<Widget?> _built = const [];
   List<Object?> _builtSignature = const [];
   TextStyle? _builtStyle;
-  bool _follow = true;
+  late bool _follow = widget.followVoice;
   int _revealedSegment = -1;
 
   @override
@@ -214,6 +251,9 @@ class _ReadAloudTextState extends State<_ReadAloudText> {
     if (!identical(widget.snapshot.plan, _plan)) {
       _layout();
       _revealedSegment = -1;
+    }
+    if (widget.followVoice != oldWidget.followVoice) {
+      _follow = widget.followVoice;
     }
     if (_follow && widget.snapshot.segment != _revealedSegment) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _reveal());
@@ -372,7 +412,7 @@ class _ReadAloudTextState extends State<_ReadAloudText> {
     for (var w = 0; w < segment.words.length; w++) {
       if (segment.words[w].start <= inPart) word = w;
     }
-    setState(() => _follow = true);
+    setState(() => _follow = widget.followVoice);
     unawaited(widget.service.playSegment(segmentIndex, word: word));
   }
 
@@ -394,6 +434,9 @@ class _ReadAloudTextState extends State<_ReadAloudText> {
       decoration: TextDecoration.underline,
       decorationStyle: TextDecorationStyle.wavy,
       decorationColor: theme.error,
+    );
+    _skippedStyle = base.copyWith(
+      color: theme.textSecondary.withValues(alpha: 0.6),
     );
     final textScaler = MediaQuery.textScalerOf(context);
     if (base != _builtStyle) {
@@ -434,7 +477,7 @@ class _ReadAloudTextState extends State<_ReadAloudText> {
               backgroundColor: theme.buttonPrimary,
               foregroundColor: theme.buttonPrimaryText,
               onPressed: () {
-                setState(() => _follow = true);
+                setState(() => _follow = widget.followVoice);
                 _reveal();
               },
               child: const Icon(Icons.my_location),
@@ -445,6 +488,7 @@ class _ReadAloudTextState extends State<_ReadAloudText> {
   }
 
   Map<int, List<int>> _failedByParagraph = const {};
+  TextStyle? _skippedStyle;
 
   Map<int, List<int>> _groupFailed() {
     final plan = _plan;
@@ -473,7 +517,7 @@ class _ReadAloudTextState extends State<_ReadAloudText> {
     final failed = _failedByParagraph[paragraphIndex];
     return (
       isCurrent ? segment : -1,
-      isCurrent ? snapshot.word : -1,
+      isCurrent && widget.highlightWords ? snapshot.word : -1,
       failed?.join(','),
       textScaler,
     );
@@ -538,13 +582,13 @@ class _ReadAloudTextState extends State<_ReadAloudText> {
       final isCurrent = segment.index == snapshot.segment;
       final isFailed = failedHere.contains(segment.index);
       final style = isFailed ? failed : (isCurrent ? current : base);
-      if (isCurrent &&
-          snapshot.word >= 0 &&
-          snapshot.word < segment.words.length) {
-        final w = segment.words[snapshot.word];
-        final offset = range.start - segment.start;
-        plain(math.max(cursor, offset + w.start), style);
-        plain(offset + w.end, word);
+      final spoken = isCurrent && widget.highlightWords ? snapshot.word : -1;
+      final offset = range.start - segment.start;
+      for (var w = 0; w < segment.words.length; w++) {
+        final entry = segment.words[w];
+        if (w != spoken && !entry.skipped) continue;
+        plain(math.max(cursor, offset + entry.start), style);
+        plain(offset + entry.end, w == spoken ? word : _skippedStyle ?? style);
       }
       plain(range.end, style);
     }
@@ -681,6 +725,7 @@ class _Options extends StatelessWidget {
     required this.sheet,
     required this.onSpeed,
     required this.onVoice,
+    required this.onSettings,
   });
 
   final ReadAloudSnapshot snapshot;
@@ -688,11 +733,14 @@ class _Options extends StatelessWidget {
   final _Sheet sheet;
   final VoidCallback onSpeed;
   final VoidCallback onVoice;
+  final VoidCallback onSettings;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
+    return Wrap(
+      alignment: WrapAlignment.center,
+      spacing: Spacing.sm,
+      runSpacing: Spacing.xs,
       children: [
         _OptionChip(
           icon: Icons.speed,
@@ -701,13 +749,19 @@ class _Options extends StatelessWidget {
           tooltip: 'Playback speed',
           onTap: onSpeed,
         ),
-        const SizedBox(width: Spacing.sm),
         _OptionChip(
           icon: Icons.record_voice_over_outlined,
           label: voice.isEmpty ? 'Default voice' : voice,
           selected: sheet == _Sheet.voices,
           tooltip: 'Voice',
           onTap: onVoice,
+        ),
+        _OptionChip(
+          icon: Icons.tune,
+          label: 'Settings',
+          selected: sheet == _Sheet.settings,
+          tooltip: 'Read-aloud settings',
+          onTap: onSettings,
         ),
       ],
     );
@@ -767,32 +821,84 @@ class _OptionChip extends StatelessWidget {
   }
 }
 
-class _SpeedChoices extends StatelessWidget {
-  const _SpeedChoices({required this.speed, required this.onPick});
+class _SpeedChoices extends StatefulWidget {
+  const _SpeedChoices({required this.speed, required this.onChanged});
 
   final double speed;
-  final ValueChanged<double> onPick;
+  final ValueChanged<double> onChanged;
+
+  @override
+  State<_SpeedChoices> createState() => _SpeedChoicesState();
+}
+
+class _SpeedChoicesState extends State<_SpeedChoices> {
+  double? _dragging;
 
   @override
   Widget build(BuildContext context) {
     final theme = context.conduitTheme;
+    final speed = _dragging ?? widget.speed;
     return Padding(
-      padding: const EdgeInsets.only(bottom: Spacing.sm),
-      child: Wrap(
-        alignment: WrapAlignment.center,
-        spacing: Spacing.xs,
+      padding: const EdgeInsets.fromLTRB(Spacing.lg, 0, Spacing.lg, Spacing.sm),
+      child: Column(
         children: [
-          for (final option in readAloudSpeeds)
-            ChoiceChip(
-              label: Text(formatReadAloudSpeed(option)),
-              selected: (option - speed).abs() < 0.01,
-              selectedColor: theme.buttonPrimary.withValues(alpha: 0.2),
-              onSelected: (_) => onPick(option),
-            ),
+          Row(
+            children: [
+              IconButton(
+                tooltip: 'Slower',
+                icon: Icon(Icons.remove, color: theme.iconSecondary),
+                onPressed: speed <= minReadAloudSpeed
+                    ? null
+                    : () => widget.onChanged(_step(speed, -0.1)),
+              ),
+              Expanded(
+                child: Slider.adaptive(
+                  value: speed.clamp(minReadAloudSpeed, maxReadAloudSpeed),
+                  min: minReadAloudSpeed,
+                  max: maxReadAloudSpeed,
+                  divisions: ((maxReadAloudSpeed - minReadAloudSpeed) * 10)
+                      .round(),
+                  label: formatReadAloudSpeed(speed),
+                  onChanged: (next) =>
+                      setState(() => _dragging = _step(next, 0)),
+                  onChangeEnd: (next) {
+                    setState(() => _dragging = null);
+                    widget.onChanged(_step(next, 0));
+                  },
+                ),
+              ),
+              IconButton(
+                tooltip: 'Faster',
+                icon: Icon(Icons.add, color: theme.iconSecondary),
+                onPressed: speed >= maxReadAloudSpeed
+                    ? null
+                    : () => widget.onChanged(_step(speed, 0.1)),
+              ),
+            ],
+          ),
+          Wrap(
+            alignment: WrapAlignment.center,
+            spacing: Spacing.xs,
+            children: [
+              for (final option in readAloudSpeedPresets)
+                ChoiceChip(
+                  label: Text(formatReadAloudSpeed(option)),
+                  selected: (option - speed).abs() < 0.01,
+                  selectedColor: theme.buttonPrimary.withValues(alpha: 0.2),
+                  onSelected: (_) => widget.onChanged(option),
+                ),
+            ],
+          ),
         ],
       ),
     );
   }
+
+  static double _step(double speed, double delta) =>
+      (((speed + delta) * 10).round() / 10).clamp(
+        minReadAloudSpeed,
+        maxReadAloudSpeed,
+      );
 }
 
 class _VoiceList extends StatefulWidget {

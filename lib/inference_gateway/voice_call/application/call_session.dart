@@ -175,7 +175,7 @@ class CallSession extends Notifier<CallSessionState> implements CallEngine {
 
   Future<bool> _setup() async {
     final cfg = ref.read(gatewayConfigProvider);
-    if (!cfg.voiceEnabled || !cfg.hasCredentials) {
+    if (!cfg.hasCredentials) {
       _emitError('Voice gateway is not configured.');
       return false;
     }

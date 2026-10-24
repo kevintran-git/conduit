@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:conduit_core/services/settings_service.dart';
+
 import 'gateway_config.dart';
 import 'gateway_storage.dart';
 
@@ -11,7 +13,21 @@ class GatewayConfigNotifier extends Notifier<GatewayConfig> {
   @override
   GatewayConfig build() {
     _storage = ref.read(gatewayStorageProvider);
-    final initial = _storage.loadSync(apiKey: '');
+    final voiceId = ref.read(
+      appSettingsProvider.select((s) => s.ttsServerVoiceId),
+    );
+    final legacy = _storage.takeLegacyVoice();
+    if (legacy.isNotEmpty && (voiceId ?? '').isEmpty) {
+      unawaited(Future.microtask(() => setTtsVoice(legacy)));
+    }
+    ref.listen<String?>(
+      appSettingsProvider.select((s) => s.ttsServerVoiceId),
+      (_, next) => state = state.copyWith(ttsVoice: next ?? ''),
+    );
+    final initial = _storage.loadSync(
+      apiKey: '',
+      voice: (voiceId ?? '').isEmpty ? legacy : voiceId!,
+    );
     unawaited(_hydrateSecureFields());
     return initial;
   }
@@ -38,27 +54,6 @@ class GatewayConfigNotifier extends Notifier<GatewayConfig> {
     await _storage.saveApiKey(trimmed);
   }
 
-  Future<void> setSttEnabled(bool value) async {
-    state = state.copyWith(sttEnabled: value);
-    await _storage.saveSttEnabled(value);
-  }
-
-  Future<void> setTtsEnabled(bool value) async {
-    state = state.copyWith(ttsEnabled: value);
-    await _storage.saveTtsEnabled(value);
-  }
-
-  Future<void> setVoiceEnabled(bool value) async {
-    state = state.copyWith(voiceEnabled: value);
-    await _storage.saveVoiceEnabled(value);
-  }
-
-  Future<void> setSttModel(String value) async {
-    final trimmed = value.trim();
-    state = state.copyWith(sttModel: trimmed);
-    await _storage.saveSttModel(trimmed);
-  }
-
   Future<void> setTtsModel(String value) async {
     final trimmed = value.trim();
     state = state.copyWith(ttsModel: trimmed);
@@ -68,12 +63,12 @@ class GatewayConfigNotifier extends Notifier<GatewayConfig> {
   Future<void> setTtsVoice(String value) async {
     final trimmed = value.trim();
     state = state.copyWith(ttsVoice: trimmed);
-    await _storage.saveTtsVoice(trimmed);
-  }
-
-  Future<void> setTtsPronunciations(String value) async {
-    state = state.copyWith(ttsPronunciations: value);
-    await _storage.saveTtsPronunciations(value);
+    await ref
+        .read(appSettingsProvider.notifier)
+        .setTtsServerVoiceSelection(
+          trimmed.isEmpty ? null : trimmed,
+          trimmed.isEmpty ? null : trimmed,
+        );
   }
 
   Future<void> setVoiceManualMode(bool value) async {
@@ -98,15 +93,14 @@ final gatewayConfigProvider =
 
 final gatewaySttActiveProvider = Provider<bool>((ref) {
   final cfg = ref.watch(gatewayConfigProvider);
-  return cfg.sttEnabled && cfg.hasCredentials;
+  final preference = ref.watch(
+    appSettingsProvider.select((s) => s.sttPreference),
+  );
+  return cfg.hasCredentials && preference == SttPreference.serverOnly;
 });
 
 final gatewayTtsActiveProvider = Provider<bool>((ref) {
   final cfg = ref.watch(gatewayConfigProvider);
-  return cfg.ttsEnabled && cfg.hasCredentials;
-});
-
-final gatewayVoiceActiveProvider = Provider<bool>((ref) {
-  final cfg = ref.watch(gatewayConfigProvider);
-  return cfg.voiceEnabled && cfg.hasCredentials;
+  final engine = ref.watch(appSettingsProvider.select((s) => s.ttsEngine));
+  return cfg.hasCredentials && engine == TtsEngine.server;
 });
