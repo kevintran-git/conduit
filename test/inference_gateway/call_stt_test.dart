@@ -16,6 +16,7 @@ class _FakeNativeSttService extends NativeSttService {
     bool emitPartialResults = true,
     bool accumulateResults = true,
     bool allowOnlineFallback = true,
+    bool emitAudio = false,
   }) async {
     final controller = StreamController<NativeSttEvent>();
     controllers.add(controller);
